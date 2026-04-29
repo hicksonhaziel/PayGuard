@@ -1,0 +1,13 @@
+{
+  "name": "qvac-payguard",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check:structure": "node scripts/check-structure.mjs"
+  }
+}
+
