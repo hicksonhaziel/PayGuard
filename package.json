@@ -7,7 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "check:structure": "node scripts/check-structure.mjs"
+    "check:structure": "node scripts/check-structure.mjs",
+    "dev:web": "npm run dev -w apps/web",
+    "build:web": "npm run build -w apps/web"
   }
 }
-

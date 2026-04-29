@@ -8,4 +8,6 @@ target
 .env.local
 coverage
 *.tsbuildinfo
-
+aboutproject.md
+build-plan.md
+project-plan.md
