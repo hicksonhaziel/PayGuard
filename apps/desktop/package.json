@@ -1,0 +1,10 @@
+{
+  "name": "@payguard/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "npm run build && electron dist/main.js"
+  }
+}

@@ -2,20 +2,6 @@
 name = "payguard_escrow"
 version = "0.1.0"
 edition = "2021"
-description = "Guarded payment Anchor program shell for QVAC PayGuard"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "payguard_escrow"
-
-[features]
-default = []
-cpi = ["no-entrypoint"]
-no-entrypoint = []
-no-idl = []
-no-log-ix-name = []
-
-[dependencies]
-anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
-

@@ -22,13 +22,41 @@ The product must show a real stablecoin payment flow where:
 
 ---
 
+## Submission reality
+
+The Tether sidetrack does **not** require a web app.
+
+What it requires is:
+
+* a valid Frontier submission before the **May 11** deadline
+* a meaningful **QVAC SDK** integration in the core product
+* local or offline execution on the user's device
+* a public GitHub repository
+* a working demo or a clear video walkthrough
+
+That means the format should be chosen for the strongest product and demo story.
+
+For this project, the best format is:
+
+* **Electron desktop app**
+
+Why:
+
+* it fits the local-first privacy story better than a browser-first build
+* it is a more natural place to run QVAC locally on desktop GPUs
+* it makes invoice and screenshot ingestion simpler
+* it makes the "data never leaves the device" argument clearer to judges
+
+---
+
 ## MVP scope
 
 The MVP is intentionally narrow.
 
 ### Core build
 
-* Connect Phantom or Solflare
+* Ship as an **Electron desktop app**
+* Support one reliable non-custodial Solana signing flow for the demo
 * Enter a payment manually or upload an invoice / screenshot
 * Run local QVAC OCR
 * Run local QVAC risk analysis
@@ -62,6 +90,7 @@ Do not spend hackathon time on:
 * translation
 * mobile app
 * browser extension
+* browser-only wallet assumptions
 * full wallet replacement
 * advanced disputes
 * broad multi-step RAG memory systems
@@ -119,6 +148,25 @@ The message to judges should be simple:
 
 ---
 
+## App format
+
+PayGuard should be built as a **local-first Electron desktop application**.
+
+That app should combine:
+
+* a desktop UI for payment entry, document upload, verdict display, and receipts
+* local QVAC inference for OCR and risk analysis
+* Solana devnet payment execution
+* local receipt storage
+
+Important constraint:
+
+* do not design the MVP around browser-extension UX that only works well in Chrome
+
+The product should be demoable from one machine, in one flow, without depending on cloud AI services.
+
+---
+
 ## Target user
 
 The MVP should focus on one primary user:
@@ -135,7 +183,9 @@ It also makes screenshot + invoice analysis feel immediately useful.
 
 ### 1. Connect wallet
 
-User connects Phantom or Solflare.
+User opens the Electron app and connects or uses the project's chosen non-custodial signing flow.
+
+For the MVP, reliability matters more than optional wallet variety.
 
 PayGuard never holds keys.
 
@@ -272,29 +322,42 @@ The output of the AI review changes how the money moves:
 
 That connection between local AI context and onchain payment behavior is the strongest part of the submission.
 
+### 4. Reproducible submission
+
+The submission should be easy to evaluate:
+
+* public repo
+* clear setup instructions
+* one-command or low-friction local run
+* short demo video in case judges do not reproduce the full stack live
+
+Demo quality only counts for 10%, but poor setup can still weaken confidence in the project.
+
 ---
 
 ## Technical architecture
 
-### apps/web
+### apps/desktop
 
 Responsibilities:
 
-* wallet connection
-* upload/manual payment UI
-* verdict and payment mode UI
-* direct send and guarded-payment client flow
-* local receipt UI
+* Electron shell and desktop UI
+* payment entry and document upload flow
+* verdict, review, and receipt screens
+* local file access and receipt persistence
+* Solana payment client flow
 
 ### apps/qvac-agent
 
 Responsibilities:
 
-* OCR wrapper
-* payment extraction
+* QVAC OCR wrapper
+* payment detail extraction
 * risk scoring
 * trusted-recipient matching
-* result formatting
+* result formatting for the desktop app
+
+
 
 ### programs/payguard_escrow
 
@@ -353,7 +416,7 @@ It needs to be understandable and convincing in a live demo.
 
 The best framing is:
 
-**PayGuard is a local-first payment safety layer for stablecoin users on Solana. It reads invoices and chat screenshots on-device with QVAC, explains risk before signature, and routes risky payments into guarded settlement instead of blind transfer.**
+**PayGuard is a local-first desktop payment safety layer for stablecoin users on Solana. It reads invoices and chat screenshots on-device with QVAC inside an Electron app, explains risk before signature, and routes risky payments into guarded settlement instead of blind transfer.**
 
 Avoid framing it as:
 
@@ -374,4 +437,4 @@ Keep it tightly about:
 
 For the sidetrack, the strongest version is:
 
-**A working web app + local QVAC OCR/risk engine + Solana devnet stablecoin payment flow + guarded-payment program + three polished demo scenarios.**
+**A working Electron desktop app + local QVAC OCR/risk engine + Solana devnet stablecoin payment flow + guarded-payment program + three polished demo scenarios, backed by a public repo and a concise demo video.**

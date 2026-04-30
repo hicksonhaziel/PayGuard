@@ -1,12 +1,15 @@
+.codex
 node_modules
 .next
 dist
+out
 target
 .turbo
 .DS_Store
 .env
 .env.local
 coverage
+*.log
 *.tsbuildinfo
 aboutproject.md
 build-plan.md

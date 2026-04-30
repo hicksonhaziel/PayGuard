@@ -1,19 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
-    "allowJs": false,
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "esModuleInterop": true,
-    "baseUrl": ".",
-    "paths": {
-      "@payguard/shared": ["packages/shared/src/index.ts"],
-      "@payguard/shared/*": ["packages/shared/src/*"]
-    }
+    "forceConsistentCasingInFileNames": true
   }
 }
-

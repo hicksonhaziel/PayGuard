@@ -1,6 +1,11 @@
-export * from "./ocr";
-export * from "./normalize";
-export * from "./risk-engine";
-export * from "./voice";
-export * from "./translation";
+export type QvacAgentStarter = {
+  status: "idle";
+  message: string;
+};
 
+const starter: QvacAgentStarter = {
+  status: "idle",
+  message: "QVAC agent scaffold is ready."
+};
+
+console.log(starter);

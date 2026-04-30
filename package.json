@@ -1,14 +1,26 @@
 {
-  "name": "qvac-payguard",
-  "private": true,
+  "name": "payguard",
   "version": "0.1.0",
+  "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "check:structure": "node scripts/check-structure.mjs",
+    "dev": "concurrently -k \"npm run dev:web\" \"npm run dev:desktop\"",
     "dev:web": "npm run dev -w apps/web",
-    "build:web": "npm run build -w apps/web"
+    "dev:desktop": "npm run dev -w apps/desktop",
+    "check:structure": "node scripts/check-structure.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.2.1",
+    "electron": "^41.3.0",
+    "next": "^16.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "typescript": "^6.0.3"
   }
 }
