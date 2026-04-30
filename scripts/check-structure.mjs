@@ -2,7 +2,8 @@ import { access } from "node:fs/promises";
 
 const required = [
   "apps/web/app/page.tsx",
-  "apps/desktop/src/main.ts",
+  "apps/desktop/electron/main.ts",
+  "apps/desktop/src/App.tsx",
   "apps/qvac-agent/src/index.ts",
   "packages/shared/src/index.ts",
   "programs/payguard_escrow/src/lib.rs"

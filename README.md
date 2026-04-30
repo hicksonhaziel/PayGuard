@@ -3,7 +3,7 @@
 Minimal TypeScript starter scaffold for:
 
 * `apps/web` Next.js landing page
-* `apps/desktop` Electron shell
+* `apps/desktop` Electron + React + Tailwind desktop app
 * `apps/qvac-agent` local AI module placeholder
 * `packages/shared` shared contracts placeholder
 * `programs/payguard_escrow` Solana program placeholder

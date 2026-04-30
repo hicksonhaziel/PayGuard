@@ -2,9 +2,14 @@
   "name": "@payguard/desktop",
   "version": "0.1.0",
   "private": true,
-  "main": "dist/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "npm run build && electron dist/main.js"
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "vite build",
+    "dev": "concurrently -k \"npm run dev:renderer\" \"npm run dev:electron\" \"npm run dev:app\"",
+    "dev:app": "wait-on tcp:127.0.0.1:5174 dist-electron/main.js dist-electron/preload.js && electronmon dist-electron/main.js",
+    "dev:electron": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
+    "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort"
   }
 }

@@ -1,5 +1,5 @@
 import { contextBridge } from "electron";
 
 contextBridge.exposeInMainWorld("payguardDesktop", {
-  starterMessage: "Electron TypeScript starter is running."
+  starterMessage: "Electron React + Tailwind starter is running."
 });
