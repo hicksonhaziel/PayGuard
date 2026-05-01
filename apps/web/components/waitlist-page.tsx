@@ -4,6 +4,7 @@ import Image from "next/image";
 import { motion } from "framer-motion";
 import type { FormEvent } from "react";
 import banner from "../assets/payguardbanner.png";
+import footerBanner from "../assets/payguardbanner2.png";
 import { Reveal } from "./reveal";
 
 const platforms = [
@@ -28,11 +29,11 @@ export function WaitlistPage() {
               src={banner}
               alt="PayGuard"
               priority
-              className="h-11 w-auto"
+              className="h-15 w-auto"
             />
           </a>
           <a
-            className="font-body inline-flex items-center justify-center rounded-[12px] bg-[#1a202c] px-4 py-2 text-[16px] text-white transition-opacity hover:opacity-90"
+            className="font-body inline-flex items-center justify-center rounded-[12px] bg-[#1a202c] px-4 py-2 text-[16px] !text-white no-underline transition-opacity hover:opacity-90"
             href="#waitlist"
           >
             Join waitlist
@@ -238,7 +239,13 @@ export function WaitlistPage() {
       <footer className="w-full border-t border-slate-200 bg-slate-50 py-16 text-slate-600 opacity-80 transition-opacity hover:opacity-100">
         <div className="mx-auto grid max-w-[1200px] grid-cols-1 items-center gap-8 px-6 md:grid-cols-2">
           <div className="flex flex-col gap-4">
-            <Image src={banner} alt="PayGuard" className="h-10 w-auto" />
+            <Image
+              src={footerBanner}
+              alt="PayGuard"
+              width={188}
+              height={66}
+              className="h-auto w-[188px]"
+            />
             <div className="font-headline text-xs uppercase tracking-[0.2em]">
               © 2026 PayGuard. Local-First Financial Security.
             </div>
