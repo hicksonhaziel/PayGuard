@@ -2,13 +2,13 @@
 
 ## One-line pitch
 
-**QVAC PayGuard is a non-custodial Solana payment safety layer that uses local QVAC AI to read invoices and screenshots on-device, score payment risk before signature, and route risky stablecoin transfers into guarded payment instead of blind direct send.**
+**QVAC PayGuard is a non-custodial Solana payment safety layer that uses local QVAC AI to read invoices and screenshots on-device, accept voice commands, analyze risk with local RAG, explain verdicts verbally, and route risky stablecoin transfers into guarded payments instead of blind direct sends.**
 
 ---
 
 ## Goal
 
-This project is being optimized for the **Tether/QVAC sidetrack**, not for the broader Frontier hackathon.
+This project is being optimized for the **Tether/QVAC sidetrack**.
 
 The goal is to win by proving one thing clearly:
 
@@ -17,7 +17,7 @@ The goal is to win by proving one thing clearly:
 The product must show a real stablecoin payment flow where:
 
 * private payment context stays local
-* QVAC performs meaningful product work before signature
+* QVAC performs meaningful product work (OCR, STT, embeddings/RAG, LLM reasoning, TTS) before signature
 * Solana executes the actual payment or guarded-payment fallback
 
 ---
@@ -26,415 +26,160 @@ The product must show a real stablecoin payment flow where:
 
 The Tether sidetrack does **not** require a web app.
 
-What it requires is:
+Requirements:
+* Valid Frontier submission before **May 11** deadline
+* Meaningful **QVAC SDK** integration in the core product
+* Local/offline execution on the user’s device
+* Public GitHub repository
+* Working demo or clear video walkthrough
 
-* a valid Frontier submission before the **May 11** deadline
-* a meaningful **QVAC SDK** integration in the core product
-* local or offline execution on the user's device
-* a public GitHub repository
-* a working demo or a clear video walkthrough
-
-That means the format should be chosen for the strongest product and demo story.
-
-For this project, the best format is:
-
-* **Electron desktop app**
-
-Why:
-
-* it fits the local-first privacy story better than a browser-first build
-* it is a more natural place to run QVAC locally on desktop GPUs
-* it makes invoice and screenshot ingestion simpler
-* it makes the "data never leaves the device" argument clearer to judges
+**App format**: Electron desktop app (best for local-first privacy story, GPU usage, file ingestion, and demo clarity).
 
 ---
 
 ## MVP scope
 
-The MVP is intentionally narrow.
-
 ### Core build
 
 * Ship as an **Electron desktop app**
-* Support one reliable non-custodial Solana signing flow for the demo
-* Enter a payment manually or upload an invoice / screenshot
-* Run local QVAC OCR
-* Run local QVAC risk analysis
-* Show a simple verdict: `Safe`, `Review`, or `Block`
-* Let the user choose `Direct Send` or `Guarded Payment`
-* Complete a real Solana devnet stablecoin flow
-* Generate a local receipt
+* Support reliable non-custodial Solana signing (Phantom/Solflare)
+* Accept payment via voice or manual entry + document upload
+* Run local QVAC OCR on invoices/screenshots
+* Run local QVAC risk analysis with lightweight RAG
+* Show verdict: `Safe`, `Review`, or `Block`
+* Let user choose `Direct Send` or `Guarded Payment`
+* Complete real Solana devnet stablecoin flow
+* Generate local receipt with option to listen to summary
+* Include **History** and **Trusted Recipients** management pages
 
-### One extra feature worth adding
+### QVAC Capabilities Used
 
-To improve odds of placing 1st or 2nd without bloating scope, add:
+* **OCR** — extract text from invoices and screenshots
+* **Speech-to-Text** — voice payment input
+* **Embeddings + RAG** — compare against local trusted recipient history
+* **LLM Inference** — risk reasoning and natural explanations
+* **Text-to-Speech** — read verdicts and summaries aloud
 
-* **Trusted recipient matching**
-
-This means the app can compare a new payment request against a small local list of known recipients and flag:
-
-* first-time recipient
-* new wallet for an existing supplier
-* name / address mismatch
-
-This feature makes the risk engine feel much more real and gives judges a stronger scam-prevention story.
+All processing is fully local.
 
 ---
 
 ## What not to build in the MVP
 
-Do not spend hackathon time on:
-
-* voice payments
-* TTS
-* translation
-* mobile app
-* browser extension
-* browser-only wallet assumptions
-* full wallet replacement
-* advanced disputes
-* broad multi-step RAG memory systems
-
-If time remains, improve demo quality and reliability instead of adding surface area.
+Do not spend time on:
+* Mobile app
+* Browser extension
+* Translation
+* Full wallet replacement
+* Advanced multi-step agent workflows
+* Complex dispute resolution
 
 ---
 
 ## Product thesis
 
-Most wallet security systems focus on the transaction itself.
+Most wallet security tools analyze the transaction after it’s crafted.  
+PayGuard analyzes the **payment context before signature** using local AI.
 
-PayGuard focuses on the **payment context before signature**.
-
-That is the wedge.
-
-Existing wallets can help answer:
-
-* what will this transaction do?
-
-PayGuard tries to answer:
-
-* who am I really paying?
-* does this match the invoice or screenshot?
-* is this a new or mismatched recipient?
-* should this be sent directly or guarded first?
+It answers the critical questions:
+* Who am I really paying?
+* Does this match the invoice/screenshot?
+* Is this a trusted or suspicious recipient?
+* Should this be direct or guarded?
 
 ---
 
 ## Why QVAC matters
 
-This product works best only if the AI runs locally.
-
-Private data may include:
-
-* invoices
-* screenshots from WhatsApp or Telegram
-* wallet addresses
-* payment amounts
-* merchant names
-* payment reasons
-* local trusted-recipient data
-
-Uploading that data to a cloud AI service weakens the privacy story and makes the sidetrack pitch worse.
-
-QVAC gives the project a strong reason to exist:
-
-* local OCR for invoice and screenshot extraction
-* local LLM or local classification for risk explanation
-* local embeddings or deterministic matching for trusted-recipient checks if needed
-
-The message to judges should be simple:
-
-**The payment is analyzed where the user is, not on someone else’s server.**
+Private data (invoices, chat screenshots, recipient history, voice input) stays on-device. Cloud AI would destroy the privacy value proposition. QVAC enables the entire intelligent pre-sign layer locally.
 
 ---
 
-## App format
+## App Screens
 
-PayGuard should be built as a **local-first Electron desktop application**.
-
-That app should combine:
-
-* a desktop UI for payment entry, document upload, verdict display, and receipts
-* local QVAC inference for OCR and risk analysis
-* Solana devnet payment execution
-* local receipt storage
-
-Important constraint:
-
-* do not design the MVP around browser-extension UX that only works well in Chrome
-
-The product should be demoable from one machine, in one flow, without depending on cloud AI services.
-
----
-
-## Target user
-
-The MVP should focus on one primary user:
-
-* **small merchant or freelancer paying suppliers / vendors in stablecoins**
-
-That use case is easier to demo than a broad “every wallet user” pitch.
-
-It also makes screenshot + invoice analysis feel immediately useful.
+1. **Home / Dashboard**
+2. **New Payment** (voice + manual + upload)
+3. **Processing**
+4. **Verdict**
+5. **Payment Confirmation**
+6. **Receipt / Success**
+7. **History** — list of all transactions (filterable by Direct/Guarded/Blocked)
+8. **Trusted Recipients** — manage known suppliers with payment stats and quick “New Payment” action
 
 ---
 
 ## MVP user flow
 
-### 1. Connect wallet
-
-User opens the Electron app and connects or uses the project's chosen non-custodial signing flow.
-
-For the MVP, reliability matters more than optional wallet variety.
-
-PayGuard never holds keys.
-
-### 2. Create a payment request
-
-The user can:
-
-* enter recipient, token, amount, and reason manually
-* upload an invoice, WhatsApp screenshot, Telegram screenshot, or receipt image
-
-### 3. Run local QVAC analysis
-
-PayGuard runs:
-
-* QVAC OCR to extract text and payment details
-* local risk analysis against payment context
-* trusted-recipient matching against locally stored known recipients
-
-### 4. Show verdict
-
-The app returns one simple verdict:
-
-* `Safe`
-* `Review`
-* `Block`
-
-It must also show short reasons, for example:
-
-* known recipient
-* new wallet address
-* amount higher than normal
-* urgency language detected
-* invoice name does not match saved supplier
-
-### 5. Choose payment mode
-
-If verdict is low-risk:
-
-* `Direct Send`
-
-If verdict is medium-risk:
-
-* `Guarded Payment`
-
-If verdict is clearly dangerous:
-
-* `Block`
-
-### 6. Complete Solana devnet payment
-
-The user signs in Phantom or Solflare.
-
-For direct send:
-
-* normal SPL stablecoin transfer
-
-For guarded payment:
-
-* transfer into the PayGuard escrow program with unlock time and recipient set
-
-### 7. Generate local receipt
-
-After completion, PayGuard stores a local receipt containing:
-
-* verdict
-* reason summary
-* recipient
-* amount
-* transfer mode
-* transaction signature
-* document hash if applicable
+1. Connect wallet (non-custodial)
+2. Create payment request (voice command or manual + upload document)
+3. Run local QVAC analysis (OCR → RAG → LLM reasoning)
+4. View verdict + hear spoken explanation (TTS)
+5. Choose payment mode (Direct Send or Guarded Payment)
+6. Sign transaction on Solana devnet
+7. Receive local receipt (with listen option)
 
 ---
 
 ## Recommended demo flows
 
-Only build around three demo flows.
+**Demo 1: Safe Payment**  
+Voice or upload clean invoice → OCR + RAG match → Safe verdict → Direct Send
 
-### Demo 1: Safe payment
+**Demo 2: Scam Attempt**  
+Upload suspicious screenshot → OCR detects urgency + new wallet → Block verdict
 
-* Upload a clean supplier invoice
-* OCR extracts amount and wallet
-* Trusted-recipient match succeeds
-* Verdict is `Safe`
-* User sends directly
+**Demo 3: First-time Recipient**  
+New recipient via voice → Review verdict → Choose Guarded Payment → Escrow on devnet
 
-### Demo 2: Scam screenshot
-
-* Upload a screenshot saying to pay a new wallet urgently
-* OCR extracts text
-* Risk engine detects urgency + new wallet + mismatch
-* Verdict is `Block`
-* No funds are sent
-
-### Demo 3: First-time recipient
-
-* User enters a manual payment to a new recipient
-* Verdict is `Review`
-* User chooses `Guarded Payment`
-* Funds move into escrow on Solana devnet
-
-These three flows are enough for the sidetrack.
+**Demo 4 (Bonus)**: Browse History and Trusted Recipients to show persistence.
 
 ---
 
 ## Judging strategy
 
-The judges should leave the demo with these impressions:
-
-### 1. Clear QVAC usage
-
-QVAC is doing real work:
-
-* reading documents locally
-* interpreting risk locally
-* preserving privacy
-
-### 2. Real product utility
-
-The app solves a believable stablecoin problem:
-
-* invoice fraud
-* wrong-recipient sends
-* supplier impersonation
-* risky first-time transfers
-
-### 3. Real onchain consequence
-
-The output of the AI review changes how the money moves:
-
-* direct send
-* guarded payment
-* block
-
-That connection between local AI context and onchain payment behavior is the strongest part of the submission.
-
-### 4. Reproducible submission
-
-The submission should be easy to evaluate:
-
-* public repo
-* clear setup instructions
-* one-command or low-friction local run
-* short demo video in case judges do not reproduce the full stack live
-
-Demo quality only counts for 10%, but poor setup can still weaken confidence in the project.
+Judges should clearly see:
+* **Strong QVAC integration** — 5 capabilities working together meaningfully
+* **Real utility** for stablecoin users (freelancers/merchants)
+* **On-chain impact** — AI decision changes payment path
+* **Privacy & local-first** — everything processed on-device
+* **Polished UX** with voice input and spoken output
 
 ---
 
 ## Technical architecture
 
 ### apps/desktop
-
-Responsibilities:
-
-* Electron shell and desktop UI
-* payment entry and document upload flow
-* verdict, review, and receipt screens
-* local file access and receipt persistence
-* Solana payment client flow
+* Electron shell + all UI screens
+* Voice handling, file upload, receipt storage
+* Navigation between Dashboard, New Payment, History, Recipients
 
 ### apps/qvac-agent
-
-Responsibilities:
-
 * QVAC OCR wrapper
-* payment detail extraction
-* risk scoring
-* trusted-recipient matching
-* result formatting for the desktop app
-
-
+* Speech-to-Text
+* Embeddings + lightweight RAG
+* LLM risk analysis
+* Text-to-Speech
+* Result formatting
 
 ### programs/payguard_escrow
-
-Responsibilities:
-
-* create guarded payment
-* cancel guarded payment before unlock
-* claim guarded payment after unlock
+* Create guarded payment
+* Cancel before unlock
+* Claim after unlock
 
 ### packages/shared
-
-Responsibilities:
-
-* shared types
-* verdict enums
-* payment intent models
-* receipt models
-
----
-
-## Suggested verdict model
-
-Use a compact, easy-to-demo model.
-
-### Safe
-
-Use when:
-
-* known recipient
-* matching invoice or expected context
-* no obvious scam pattern
-
-### Review
-
-Use when:
-
-* first-time recipient
-* amount is unusual
-* address changed for a known supplier
-
-### Block
-
-Use when:
-
-* strong urgency language
-* clear mismatch between claimed recipient and wallet
-* obviously suspicious payment context
-
-This does not need to be academically perfect.
-
-It needs to be understandable and convincing in a live demo.
+* Types, verdict enums, models, etc.
 
 ---
 
 ## Submission positioning
 
-The best framing is:
+**PayGuard is a local-first desktop payment safety layer for Solana stablecoin users.**  
+It lets you speak a payment, reads invoices/screenshots on-device with QVAC, analyzes risk using local RAG, explains decisions verbally, and intelligently routes payments (direct or guarded) — all while keeping sensitive data private.
 
-**PayGuard is a local-first desktop payment safety layer for stablecoin users on Solana. It reads invoices and chat screenshots on-device with QVAC inside an Electron app, explains risk before signature, and routes risky payments into guarded settlement instead of blind transfer.**
-
-Avoid framing it as:
-
-* “AI wallet”
-* “general crypto security tool”
-* “all-in-one payments platform”
-
-Keep it tightly about:
-
-* stablecoin payments
-* local privacy
-* pre-sign risk review
-* guarded fallback on Solana
+This is the strongest version for the sidetrack.
 
 ---
 
 ## Final build decision
 
-For the sidetrack, the strongest version is:
-
-**A working Electron desktop app + local QVAC OCR/risk engine + Solana devnet stablecoin payment flow + guarded-payment program + three polished demo scenarios, backed by a public repo and a concise demo video.**
+A polished Electron desktop app with full local QVAC intelligence (OCR + Voice + RAG + LLM + TTS), Solana devnet integration, guarded escrow, History & Recipients pages, backed by a clean repo, setup instructions, and a strong demo video.

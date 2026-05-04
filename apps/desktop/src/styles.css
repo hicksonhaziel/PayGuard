@@ -1,8 +1,10 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  color-scheme: dark;
-  font-family: "Segoe UI", sans-serif;
+  color-scheme: light;
+  font-family: Inter, "Segoe UI", sans-serif;
 }
 
 * {
@@ -14,10 +16,194 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
   min-height: 100vh;
-  background: #07111f;
-  color: #e2e8f0;
+  background: #f7fafc;
+  color: #181c1e;
+}
+
+button {
+  font: inherit;
+}
+
+.material-symbols-outlined {
+  direction: ltr;
+  display: inline-block;
+  font-family: "Material Symbols Outlined";
+  font-feature-settings: "liga";
+  font-size: 20px;
+  font-style: normal;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  font-weight: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+}
+
+.pg-icon-button {
+  @apply inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border-0 bg-transparent text-[#45474c] transition-colors hover:bg-[#ebeef0] hover:text-[#030813] dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white;
+}
+
+.pg-button {
+  @apply inline-flex min-h-[42px] cursor-pointer items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-bold transition duration-150 active:scale-[0.98] max-md:flex-1 max-md:basis-[180px];
+}
+
+.pg-text-button {
+  @apply cursor-pointer border-0 bg-transparent p-0 text-xs font-extrabold text-[#006c49] hover:underline;
+}
+
+.pg-field-label {
+  @apply text-xs font-semibold uppercase tracking-[0.08em] text-[#45474c] dark:text-slate-400;
+}
+
+.pg-input {
+  @apply w-full rounded-xl border border-[#c6c6cc] bg-white py-2.5 pl-4 pr-4 text-sm text-[#030813] transition-all placeholder:text-[#76777c] focus:border-[#1a202c] focus:outline-none focus:ring-2 focus:ring-[#6cf8bb]/50 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-slate-500 dark:focus:border-[#6ffbbe];
+}
+
+.pg-page-transition {
+  backface-visibility: hidden;
+  overflow-x: hidden;
+  transform: translateZ(0);
+  will-change: opacity, transform;
+}
+
+.pg-page-enter.pg-page-forward {
+  animation: pg-page-sweep-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.pg-page-exit.pg-page-forward {
+  animation: pg-page-sweep-out 170ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+
+.pg-page-enter.pg-page-backward {
+  animation: pg-page-sweep-in-reverse 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.pg-page-exit.pg-page-backward {
+  animation: pg-page-sweep-out-reverse 170ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+
+.pg-pulse-ring {
+  animation: pg-pulse-ring 1800ms ease-in-out infinite;
+}
+
+.pg-pulse-ring--delay {
+  animation-delay: 240ms;
+}
+
+.pg-spinner {
+  animation: pg-spin 900ms linear infinite;
+}
+
+.pg-soft-pulse {
+  animation: pg-soft-pulse 1800ms ease-in-out infinite;
+}
+
+@keyframes pg-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pg-page-sweep-in {
+  from {
+    opacity: 0;
+    transform: translate3d(34px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes pg-page-sweep-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-18px, 0, 0);
+  }
+}
+
+@keyframes pg-page-sweep-in-reverse {
+  from {
+    opacity: 0;
+    transform: translate3d(-34px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes pg-page-sweep-out-reverse {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(18px, 0, 0);
+  }
+}
+
+@keyframes pg-page-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes pg-pulse-ring {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes pg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pg-soft-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
 }
