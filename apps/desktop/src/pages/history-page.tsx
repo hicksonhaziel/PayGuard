@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ConnectedWallet } from "../App";
 
 const historyTabs = ["All Payments", "Direct", "Guarded", "Blocked"];
 
@@ -6,15 +7,25 @@ type StoredPaymentHistory = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listPaymentHistory"]>
 >[number];
 
-export function HistoryPage() {
+export function HistoryPage({ wallet }: { wallet: ConnectedWallet | null }) {
   const [transactions, setTransactions] = useState<StoredPaymentHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadHistory() {
+      if (!wallet) {
+        setTransactions([]);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        setTransactions(await window.payguardDesktop!.store.listPaymentHistory());
+        setIsLoading(true);
+        setTransactions(
+          await window.payguardDesktop!.store.listPaymentHistory(wallet.address)
+        );
         setError(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Could not load history.");
@@ -24,7 +35,7 @@ export function HistoryPage() {
     }
 
     void loadHistory();
-  }, []);
+  }, [wallet?.address]);
 
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-6 dark:bg-[#0f172a] max-lg:px-5">
@@ -79,6 +90,10 @@ export function HistoryPage() {
         {error ? (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-[#9f1239] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-200">
             {error}
+          </div>
+        ) : !wallet ? (
+          <div className="rounded-2xl border border-[#e0e3e5] bg-white p-6 text-sm text-[#45474c] dark:border-white/10 dark:bg-[#111827] dark:text-slate-400">
+            Connect wallet to view payment history.
           </div>
         ) : isLoading ? (
           <p className="text-sm text-[#45474c] dark:text-slate-400">

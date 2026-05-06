@@ -87,9 +87,13 @@ export function TrustedSupplier({
           <button
             className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-[11px] font-semibold leading-4 text-[#030813] transition-colors hover:bg-[#f1f4f6] dark:text-white dark:hover:bg-white/10"
             onClick={startPayment}
+            style={{ fontSize: 12, lineHeight: "18px" }}
             type="button"
           >
-            <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">
+            <span
+              className="material-symbols-outlined text-[#006c49] dark:text-[#6ffbbe]"
+              style={{ fontSize: 16 }}
+            >
               send
             </span>
             New Payment
@@ -97,9 +101,13 @@ export function TrustedSupplier({
           <button
             className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-[11px] font-semibold leading-4 text-[#030813] transition-colors hover:bg-[#f1f4f6] dark:text-white dark:hover:bg-white/10"
             onClick={copyWallet}
+            style={{ fontSize: 12, lineHeight: "18px" }}
             type="button"
           >
-            <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">
+            <span
+              className="material-symbols-outlined text-[#006c49] dark:text-[#6ffbbe]"
+              style={{ fontSize: 16 }}
+            >
               {copyState === "copied" ? "check" : "content_copy"}
             </span>
             {copyState === "copied" ? "Copied" : "Copy Wallet"}
@@ -107,9 +115,13 @@ export function TrustedSupplier({
           <button
             className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-1 text-left text-[11px] font-semibold leading-4 text-[#030813] transition-colors hover:bg-[#f1f4f6] dark:text-white dark:hover:bg-white/10"
             onClick={viewDetails}
+            style={{ fontSize: 12, lineHeight: "18px" }}
             type="button"
           >
-            <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">
+            <span
+              className="material-symbols-outlined text-[#006c49] dark:text-[#6ffbbe]"
+              style={{ fontSize: 16 }}
+            >
               manage_search
             </span>
             View Details

@@ -8,6 +8,7 @@ import type {
 
 type StoredRecipient = {
   id: string;
+  ownerWallet: string;
   name: string;
   walletAddress: string;
   category: string;
@@ -25,6 +26,7 @@ type RecipientSummary = StoredRecipient & {
 
 type StoredPaymentHistory = {
   id: string;
+  ownerWallet: string;
   recipientId: string | null;
   recipientName: string;
   senderWallet: string;
@@ -76,6 +78,15 @@ declare global {
       analyzeDocumentWithOcr: (imagePath: string) => Promise<QvacOcrResult>;
       analyzePaymentRisk: (input: RiskAnalysisInput) => Promise<RiskVerdict>;
       getPathForFile: (file: File) => string;
+      getWalletBalances: (walletAddress: string) => Promise<{
+        SOL: number | null;
+        USDC: number | null;
+        USDT: number | null;
+        cachedAt: string;
+        errors: Partial<Record<"SOL" | "USDC" | "USDT", string | null>>;
+        expiresAt: string;
+        isStale: boolean;
+      }>;
       matchRecipientWithRag: (input: PaymentRagInput) => Promise<RecipientRagResult>;
       onExternalWalletConnected: (
         callback: (wallet: {
@@ -96,11 +107,12 @@ declare global {
           category?: string;
           name?: string;
           notes?: string;
+          ownerWallet: string;
           walletAddress: string;
         }) => Promise<StoredRecipient>;
-        listOnchainImports: () => Promise<StoredOnchainImport[]>;
-        listPaymentHistory: () => Promise<StoredPaymentHistory[]>;
-        listRecipients: () => Promise<RecipientSummary[]>;
+        listOnchainImports: (ownerWallet: string) => Promise<StoredOnchainImport[]>;
+        listPaymentHistory: (ownerWallet: string) => Promise<StoredPaymentHistory[]>;
+        listRecipients: (ownerWallet: string) => Promise<RecipientSummary[]>;
       };
       starterMessage: string;
     };

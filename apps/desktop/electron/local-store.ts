@@ -5,6 +5,7 @@ import { app } from "electron";
 
 export type StoredRecipient = {
   id: string;
+  ownerWallet: string;
   name: string;
   walletAddress: string;
   category: string;
@@ -16,6 +17,7 @@ export type StoredRecipient = {
 
 export type StoredPaymentHistory = {
   id: string;
+  ownerWallet: string;
   recipientId: string | null;
   recipientName: string;
   senderWallet: string;
@@ -62,13 +64,14 @@ export function getLocalStore() {
   return database;
 }
 
-export function listRecipients(): RecipientSummary[] {
+export function listRecipients(ownerWallet: string): RecipientSummary[] {
   const db = getLocalStore();
 
   return db
     .prepare(`
       SELECT
         r.id,
+        r.owner_wallet AS ownerWallet,
         r.name,
         r.wallet_address AS walletAddress,
         r.category,
@@ -81,17 +84,21 @@ export function listRecipients(): RecipientSummary[] {
         COALESCE(AVG(CAST(h.amount AS REAL)), 0) AS averageAmountValue,
         COALESCE(MAX(h.token), 'USDC') AS averageAmountToken
       FROM recipients r
-      LEFT JOIN payment_history h ON h.recipient_id = r.id
+      LEFT JOIN payment_history h
+        ON h.recipient_id = r.id
+       AND h.owner_wallet = r.owner_wallet
+      WHERE r.owner_wallet = ?
       GROUP BY r.id
       ORDER BY r.updated_at DESC
     `)
-    .all()
+    .all(ownerWallet)
     .map((row) => {
       const record = row as Record<string, unknown>;
       const averageAmountValue = Number(record.averageAmountValue ?? 0);
 
       return {
         id: String(record.id),
+        ownerWallet: String(record.ownerWallet),
         name: String(record.name),
         walletAddress: String(record.walletAddress),
         category: String(record.category),
@@ -118,12 +125,14 @@ export function addRecipient(input: {
   category?: string;
   name?: string;
   notes?: string;
+  ownerWallet: string;
   walletAddress: string;
 }) {
   const db = getLocalStore();
   const now = new Date().toISOString();
   const recipient: StoredRecipient = {
     id: randomUUID(),
+    ownerWallet: input.ownerWallet,
     name: input.name?.trim() || formatWalletLabel(input.walletAddress),
     walletAddress: input.walletAddress,
     category: input.category ?? "General",
@@ -135,11 +144,12 @@ export function addRecipient(input: {
 
   db.prepare(`
     INSERT INTO recipients (
-      id, name, wallet_address, category, notes, trusted_since, created_at, updated_at
+      id, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     recipient.id,
+    recipient.ownerWallet,
     recipient.name,
     recipient.walletAddress,
     recipient.category,
@@ -152,13 +162,14 @@ export function addRecipient(input: {
   return recipient;
 }
 
-export function listPaymentHistory(): StoredPaymentHistory[] {
+export function listPaymentHistory(ownerWallet: string): StoredPaymentHistory[] {
   const db = getLocalStore();
 
   return db
     .prepare(`
       SELECT
         id,
+        owner_wallet AS ownerWallet,
         recipient_id AS recipientId,
         recipient_name AS recipientName,
         sender_wallet AS senderWallet,
@@ -174,15 +185,17 @@ export function listPaymentHistory(): StoredPaymentHistory[] {
         paid_at AS paidAt,
         created_at AS createdAt
       FROM payment_history
+      WHERE owner_wallet = ?
       ORDER BY paid_at DESC
       LIMIT 100
     `)
-    .all()
+    .all(ownerWallet)
     .map((row) => normalizePaymentHistory(row as Record<string, unknown>));
 }
 
 export function addPaymentHistory(input: {
   amount: string;
+  ownerWallet: string;
   recipientName: string;
   recipientWallet: string;
   riskScore: number;
@@ -196,9 +209,14 @@ export function addPaymentHistory(input: {
 }) {
   const db = getLocalStore();
   const now = new Date().toISOString();
-  const recipientId = findOrCreateRecipient(input.recipientName, input.recipientWallet);
+  const recipientId = findOrCreateRecipient(
+    input.ownerWallet,
+    input.recipientName,
+    input.recipientWallet
+  );
   const history: StoredPaymentHistory = {
     id: randomUUID(),
+    ownerWallet: input.ownerWallet,
     recipientId,
     recipientName: input.recipientName,
     senderWallet: input.senderWallet ?? "",
@@ -217,12 +235,13 @@ export function addPaymentHistory(input: {
 
   db.prepare(`
     INSERT INTO payment_history (
-      id, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
+      id, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
       route, verdict, risk_score, tx_signature, source, summary, paid_at, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     history.id,
+    history.ownerWallet,
     history.recipientId,
     history.recipientName,
     history.senderWallet,
@@ -242,7 +261,7 @@ export function addPaymentHistory(input: {
   return history;
 }
 
-export function listOnchainImports(): StoredOnchainImport[] {
+export function listOnchainImports(ownerWallet: string): StoredOnchainImport[] {
   const db = getLocalStore();
 
   return db
@@ -258,10 +277,11 @@ export function listOnchainImports(): StoredOnchainImport[] {
         completed_at AS completedAt,
         error
       FROM onchain_imports
+      WHERE wallet_address = ?
       ORDER BY started_at DESC
       LIMIT 50
     `)
-    .all()
+    .all(ownerWallet)
     .map((row) => {
       const record = row as Record<string, unknown>;
 
@@ -282,21 +302,30 @@ export function listOnchainImports(): StoredOnchainImport[] {
 function initializeDatabase(db: DatabaseSync) {
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = OFF;
+  `);
+
+  migrateLocalStore(db);
+
+  db.exec(`
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS recipients (
       id TEXT PRIMARY KEY,
+      owner_wallet TEXT NOT NULL,
       name TEXT NOT NULL,
-      wallet_address TEXT NOT NULL UNIQUE,
+      wallet_address TEXT NOT NULL,
       category TEXT NOT NULL DEFAULT 'General',
       notes TEXT NOT NULL DEFAULT '',
       trusted_since TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      UNIQUE(owner_wallet, wallet_address)
     );
 
     CREATE TABLE IF NOT EXISTS payment_history (
       id TEXT PRIMARY KEY,
+      owner_wallet TEXT NOT NULL,
       recipient_id TEXT,
       recipient_name TEXT NOT NULL,
       sender_wallet TEXT NOT NULL DEFAULT '',
@@ -328,6 +357,8 @@ function initializeDatabase(db: DatabaseSync) {
 
     CREATE INDEX IF NOT EXISTS idx_payment_history_recipient_id
       ON payment_history(recipient_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_history_owner_wallet
+      ON payment_history(owner_wallet);
     CREATE INDEX IF NOT EXISTS idx_payment_history_paid_at
       ON payment_history(paid_at);
     CREATE INDEX IF NOT EXISTS idx_onchain_imports_wallet_recipient
@@ -355,11 +386,124 @@ function cleanSeedRecipients(db: DatabaseSync) {
   }
 }
 
-function findOrCreateRecipient(name: string, walletAddress: string) {
+function migrateLocalStore(db: DatabaseSync) {
+  const migratedRecipients =
+    tableExists(db, "recipients") && !tableHasColumn(db, "recipients", "owner_wallet");
+
+  if (migratedRecipients) {
+    db.exec(`
+      ALTER TABLE recipients RENAME TO recipients_legacy;
+
+      CREATE TABLE recipients (
+        id TEXT PRIMARY KEY,
+        owner_wallet TEXT NOT NULL,
+        name TEXT NOT NULL,
+        wallet_address TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General',
+        notes TEXT NOT NULL DEFAULT '',
+        trusted_since TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_wallet, wallet_address)
+      );
+
+      INSERT OR IGNORE INTO recipients (
+        id, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
+      )
+      SELECT
+        id,
+        '',
+        name,
+        wallet_address,
+        category,
+        notes,
+        trusted_since,
+        created_at,
+        updated_at
+      FROM recipients_legacy;
+
+      DROP TABLE recipients_legacy;
+    `);
+  }
+
+  if (
+    tableExists(db, "payment_history") &&
+    (migratedRecipients || !tableHasColumn(db, "payment_history", "owner_wallet"))
+  ) {
+    const ownerWalletSelect = tableHasColumn(db, "payment_history", "owner_wallet")
+      ? "owner_wallet"
+      : "''";
+
+    db.exec(`
+      ALTER TABLE payment_history RENAME TO payment_history_legacy;
+
+      CREATE TABLE payment_history (
+        id TEXT PRIMARY KEY,
+        owner_wallet TEXT NOT NULL,
+        recipient_id TEXT,
+        recipient_name TEXT NOT NULL,
+        sender_wallet TEXT NOT NULL DEFAULT '',
+        recipient_wallet TEXT NOT NULL,
+        amount TEXT NOT NULL,
+        token TEXT NOT NULL,
+        route TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        risk_score INTEGER NOT NULL,
+        tx_signature TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        paid_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (recipient_id) REFERENCES recipients(id) ON DELETE SET NULL
+      );
+
+      INSERT OR IGNORE INTO payment_history (
+        id, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
+        route, verdict, risk_score, tx_signature, source, summary, paid_at, created_at
+      )
+      SELECT
+        id,
+        ${ownerWalletSelect},
+        recipient_id,
+        recipient_name,
+        sender_wallet,
+        recipient_wallet,
+        amount,
+        token,
+        route,
+        verdict,
+        risk_score,
+        tx_signature,
+        source,
+        summary,
+        paid_at,
+        created_at
+      FROM payment_history_legacy;
+
+      DROP TABLE payment_history_legacy;
+    `);
+  }
+}
+
+function tableExists(db: DatabaseSync, tableName: string) {
+  const result = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { name?: string } | undefined;
+
+  return Boolean(result?.name);
+}
+
+function tableHasColumn(db: DatabaseSync, tableName: string, columnName: string) {
+  return (db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[]).some(
+    (column) => column.name === columnName
+  );
+}
+
+function findOrCreateRecipient(ownerWallet: string, name: string, walletAddress: string) {
   const db = getLocalStore();
   const existing = db
-    .prepare("SELECT id FROM recipients WHERE wallet_address = ?")
-    .get(walletAddress) as { id: string } | undefined;
+    .prepare("SELECT id FROM recipients WHERE owner_wallet = ? AND wallet_address = ?")
+    .get(ownerWallet, walletAddress) as { id: string } | undefined;
 
   if (existing?.id) {
     db.prepare("UPDATE recipients SET name = ?, updated_at = ? WHERE id = ?").run(
@@ -373,6 +517,7 @@ function findOrCreateRecipient(name: string, walletAddress: string) {
   return addRecipient({
     category: "PayGuard",
     name,
+    ownerWallet,
     walletAddress
   }).id;
 }
@@ -380,6 +525,7 @@ function findOrCreateRecipient(name: string, walletAddress: string) {
 function normalizePaymentHistory(record: Record<string, unknown>): StoredPaymentHistory {
   return {
     id: String(record.id),
+    ownerWallet: String(record.ownerWallet),
     recipientId: record.recipientId ? String(record.recipientId) : null,
     recipientName: String(record.recipientName),
     senderWallet: String(record.senderWallet),

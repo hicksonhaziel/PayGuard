@@ -233,9 +233,9 @@ export default function App() {
             onViewRecipients={() => navigateTo("recipients")}
           />
         ) : visibleScreen === "history" ? (
-          <HistoryPage />
+          <HistoryPage wallet={connectedWallet} />
         ) : visibleScreen === "recipients" ? (
-          <RecipientsPage onStartPayment={startNewPayment} />
+          <RecipientsPage wallet={connectedWallet} onStartPayment={startNewPayment} />
         ) : visibleScreen === "analyzing" ? (
           <AnalyzeStatePage onComplete={() => navigateTo("confirm")} />
         ) : visibleScreen === "confirm" ? (
@@ -259,6 +259,7 @@ export default function App() {
           />
         ) : (
           <NewPaymentPage
+            wallet={connectedWallet}
             prefilledRecipient={prefilledRecipient}
             onBack={() => navigateTo("home")}
             onAnalyze={completeRiskAnalysis}

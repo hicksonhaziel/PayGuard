@@ -33,18 +33,19 @@ export function SuccessPage({ decision, wallet, onNewPayment }: SuccessPageProps
   ] as const;
 
   useEffect(() => {
-    if (!decision || savedReceiptRef.current) {
+    if (!decision || !wallet || savedReceiptRef.current) {
       return;
     }
 
     savedReceiptRef.current = true;
     void window.payguardDesktop?.store.addPaymentHistory({
       amount: decision.amount,
+      ownerWallet: wallet.address,
       recipientName: decision.recipientName,
       recipientWallet: decision.walletAddress,
       riskScore: decision.verdict.riskScore,
       route: decision.selectedRoute,
-      senderWallet: wallet?.address ?? "",
+      senderWallet: wallet.address,
       source: "payguard",
       summary: decision.verdict.summary,
       token: decision.token,

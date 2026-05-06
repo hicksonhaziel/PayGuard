@@ -1,41 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityCard } from "../components/home/activity-card";
 import { TrustedSupplier } from "../components/home/trusted-supplier";
 import type { ConnectedWallet, PrefilledRecipient } from "../App";
-
-const recentActivity = [
-  {
-    amount: "2,500.00 USDC",
-    date: "Oct 14, 2023",
-    icon: "description",
-    id: "#PG-9281",
-    status: "Verified",
-    title: "Acme Corp - Cloud Infrastructure",
-    action: "Details"
-  },
-  {
-    amount: "12,400.00 USDC",
-    date: "Oct 12, 2023",
-    icon: "shopping_bag",
-    id: "#PG-9275",
-    status: "Verified",
-    title: "Hardware Inc - Workstations",
-    action: "Details"
-  },
-  {
-    amount: "850.00 USDC",
-    date: "Oct 10, 2023",
-    icon: "priority_high",
-    id: "#PG-9269",
-    status: "Needs Review",
-    title: "Unknown Vendor - Miscellaneous",
-    action: "Resolve"
-  }
-] as const;
+import solanaLogo from "../../assets/solana.png";
+import usdcLogo from "../../assets/usdc.png";
+import usdtLogo from "../../assets/usdt.png";
 
 type RecipientSummary = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
 >[number];
+type WalletBalances = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["getWalletBalances"]>
+>;
 
 interface HomePageProps {
   wallet: ConnectedWallet | null;
@@ -56,18 +31,79 @@ export function HomePage({
 }: HomePageProps) {
   const [trustedRecipients, setTrustedRecipients] = useState<RecipientSummary[]>([]);
   const [isLoadingRecipients, setIsLoadingRecipients] = useState(true);
+  const [balances, setBalances] = useState<WalletBalances | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
+  const balancesRef = useRef<WalletBalances | null>(null);
+  const totalRecipientPayments = trustedRecipients.reduce(
+    (total, recipient) => total + recipient.payments,
+    0
+  );
 
   useEffect(() => {
     async function loadRecipients() {
+      if (!wallet) {
+        setTrustedRecipients([]);
+        setIsLoadingRecipients(false);
+        return;
+      }
+
       try {
-        setTrustedRecipients(await window.payguardDesktop!.store.listRecipients());
+        setIsLoadingRecipients(true);
+        setTrustedRecipients(
+          await window.payguardDesktop!.store.listRecipients(wallet.address)
+        );
       } finally {
         setIsLoadingRecipients(false);
       }
     }
 
     void loadRecipients();
-  }, []);
+  }, [wallet]);
+
+  useEffect(() => {
+    let refreshTimeout: number | null = null;
+
+    async function loadBalances() {
+      if (!wallet) {
+        balancesRef.current = null;
+        setBalances(null);
+        setBalanceError(null);
+        setIsLoadingBalances(false);
+        return;
+      }
+
+      try {
+        setIsLoadingBalances(!balancesRef.current);
+        setBalanceError(null);
+        const nextBalances = await window.payguardDesktop!.getWalletBalances(wallet.address);
+        const refreshDelay = Math.max(
+          new Date(nextBalances.expiresAt).getTime() - Date.now() + 500,
+          1000
+        );
+
+        balancesRef.current = nextBalances;
+        setBalances(nextBalances);
+        refreshTimeout = window.setTimeout(() => {
+          void loadBalances();
+        }, refreshDelay);
+      } catch (error) {
+        setBalanceError(
+          error instanceof Error ? error.message : "Could not fetch wallet balances."
+        );
+      } finally {
+        setIsLoadingBalances(false);
+      }
+    }
+
+    void loadBalances();
+
+    return () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+    };
+  }, [wallet?.address]);
 
   return (
     <>
@@ -118,22 +154,49 @@ export function HomePage({
           ) : null}
 
           <section className="mb-12">
-            <div className="mb-6 flex items-center justify-between max-md:flex-col max-md:items-start max-md:gap-3">
-              <h2 className="m-0 flex items-center gap-3 text-xl font-extrabold leading-tight text-[#030813] dark:text-white">
-                Recent Activity
-                <span className="rounded-md bg-[#6cf8bb] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.05em] text-[#00714d]">
-                  3 Pending
-                </span>
-              </h2>
-              <button className="pg-text-button" type="button">
-                View more
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-6 max-lg:grid-cols-1">
-              {recentActivity.map((activity) => (
-                <ActivityCard key={activity.id} {...activity} />
-              ))}
+            <div className="grid grid-cols-12 gap-3">
+              <BalanceCard
+                amount={balances?.USDT ?? null}
+                error={balanceError ?? balances?.errors.USDT ?? null}
+                isLoading={isLoadingBalances}
+                logo={usdtLogo}
+                name="Tether USD"
+                symbol="USDT"
+                wallet={wallet}
+              />
+              <BalanceCard
+                amount={balances?.USDC ?? null}
+                error={balanceError ?? balances?.errors.USDC ?? null}
+                isLoading={isLoadingBalances}
+                logo={usdcLogo}
+                name="USD Coin"
+                symbol="USDC"
+                wallet={wallet}
+              />
+              <WalletMetricCard
+                error={balanceError ?? balances?.errors.SOL ?? null}
+                label="SOL balance"
+                logo={solanaLogo}
+                value={
+                  wallet
+                    ? balances?.SOL !== null && balances?.SOL !== undefined
+                        ? formatTokenAmount(balances.SOL, "SOL")
+                        : isLoadingBalances
+                          ? "Loading"
+                        : "--"
+                    : "--"
+                }
+              />
+              <WalletMetricCard
+                icon="group"
+                label="Trusted recipients"
+                value={wallet ? String(trustedRecipients.length) : "--"}
+              />
+              <WalletMetricCard
+                icon="receipt_long"
+                label="Total payments"
+                value={wallet ? String(totalRecipientPayments) : "--"}
+              />
             </div>
           </section>
 
@@ -166,7 +229,9 @@ export function HomePage({
                   ))
                 ) : (
                   <div className="col-span-full rounded-xl border border-dashed border-[#c6c6cc] bg-white/70 px-4 py-5 text-sm text-[#45474c] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-                    No recipients yet. Add a recipient from the Recipients page to build trusted history.
+                    {wallet
+                      ? "No recipients yet. Add a recipient from the Recipients page to build trusted history."
+                      : "Connect wallet to view trusted recipients."}
                   </div>
                 )}
               </div>
@@ -175,6 +240,110 @@ export function HomePage({
         </div>
       </main>
     </>
+  );
+}
+
+function BalanceCard({
+  amount,
+  error,
+  isLoading,
+  logo,
+  name,
+  symbol,
+  wallet
+}: {
+  amount: number | null;
+  error: string | null;
+  isLoading: boolean;
+  logo: string;
+  name: string;
+  symbol: "USDC" | "USDT";
+  wallet: ConnectedWallet | null;
+}) {
+  return (
+    <article className="col-span-3 rounded-xl border border-[#e0e3e5] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827] max-lg:col-span-6 max-sm:col-span-12">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <img
+            alt={`${symbol} logo`}
+            className="h-9 w-9 rounded-full"
+            src={logo}
+          />
+          <div>
+            <h3 className="m-0 text-sm font-bold text-[#030813] dark:text-white">
+              {symbol}
+            </h3>
+            <p className="text-xs text-[#45474c] dark:text-slate-400">{name}</p>
+          </div>
+        </div>
+        <span className="rounded-md bg-[#f1f4f6] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.05em] text-[#45474c] dark:bg-white/10 dark:text-slate-300">
+          SPL
+        </span>
+      </div>
+
+      <p className="font-['Manrope'] text-2xl font-bold leading-tight text-[#030813] dark:text-white">
+        {wallet
+          ? amount !== null
+              ? formatTokenAmount(amount, symbol)
+              : isLoading
+                ? "Loading"
+              : "--"
+          : "Connect wallet"}
+      </p>
+      <p className="mt-2 text-xs leading-5 text-[#45474c] dark:text-slate-400">
+        {error && amount === null
+          ? "Balance sync failed. Retrying from cache window."
+          : wallet
+            ? ""
+            : "Connect Solflare or Phantom to load this wallet's balance."}
+      </p>
+    </article>
+  );
+}
+
+function formatTokenAmount(amount: number, symbol: "SOL" | "USDC" | "USDT") {
+  const maximumFractionDigits = symbol === "SOL" ? 4 : 2;
+
+  return `${amount.toLocaleString(undefined, {
+    maximumFractionDigits,
+    minimumFractionDigits: amount > 0 && amount < 1 ? 2 : 0
+  })} ${symbol}`;
+}
+
+function WalletMetricCard({
+  error,
+  icon,
+  label,
+  logo,
+  value
+}: {
+  error?: string | null;
+  icon?: string;
+  label: string;
+  logo?: string;
+  value: string;
+}) {
+  return (
+    <article className="col-span-2 rounded-xl border border-[#e0e3e5] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.04)] dark:border-white/10 dark:bg-[#111827] max-lg:col-span-4 max-sm:col-span-12">
+      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]">
+        {logo ? (
+          <img alt="" className="h-6 w-8 rounded-full object-contain" src={logo} />
+        ) : (
+          <span className="material-symbols-outlined text-[20px]">{icon}</span>
+        )}
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-[0.05em] text-[#45474c] dark:text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 font-['Manrope'] text-xl font-bold text-[#030813] dark:text-white">
+        {value}
+      </p>
+      {error ? (
+        <p className="mt-1 text-[11px] leading-4 text-[#9f1239] dark:text-rose-300">
+          Retrying sync
+        </p>
+      ) : null}
+    </article>
   );
 }
 

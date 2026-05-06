@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import type { PrefilledRecipient } from "../App";
+import type { ConnectedWallet, PrefilledRecipient } from "../App";
 
 interface RecipientsPageProps {
+  wallet: ConnectedWallet | null;
   onStartPayment: (recipient?: PrefilledRecipient) => void;
 }
 
@@ -10,16 +11,23 @@ type RecipientSummary = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
 >[number];
 
-export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
+export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) {
   const [recipients, setRecipients] = useState<RecipientSummary[]>([]);
   const [isAddingRecipient, setIsAddingRecipient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function loadRecipients() {
+    if (!wallet) {
+      setRecipients([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       setIsLoading(true);
-      setRecipients(await window.payguardDesktop!.store.listRecipients());
+      setRecipients(await window.payguardDesktop!.store.listRecipients(wallet.address));
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load recipients.");
@@ -30,7 +38,7 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
 
   useEffect(() => {
     void loadRecipients();
-  }, []);
+  }, [wallet?.address]);
 
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-5 dark:bg-[#0f172a] max-lg:px-5">
@@ -57,7 +65,8 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
               />
             </label>
             <button
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-[#1a202c] px-3.5 py-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-[#6ffbbe] dark:text-[#002113]"
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-[#1a202c] px-3.5 py-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#6ffbbe] dark:text-[#002113]"
+              disabled={!wallet}
               onClick={() => setIsAddingRecipient(true)}
               type="button"
             >
@@ -73,7 +82,19 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
           </div>
         ) : null}
 
-        {isLoading ? (
+        {!wallet ? (
+          <div className="rounded-2xl border border-dashed border-[#c6c6cc] bg-white p-8 text-center shadow-[0_4px_20px_rgba(26,32,44,0.04)] dark:border-white/10 dark:bg-[#111827]">
+            <span className="material-symbols-outlined mb-2 text-4xl text-[#76777c] dark:text-slate-400">
+              lock
+            </span>
+            <h2 className="mb-1 font-['Manrope'] text-lg font-bold text-[#030813] dark:text-white">
+              Connect wallet to view recipients
+            </h2>
+            <p className="mx-auto max-w-md text-sm leading-6 text-[#45474c] dark:text-slate-400">
+              Recipients are stored locally per connected wallet.
+            </p>
+          </div>
+        ) : isLoading ? (
           <p className="text-sm text-[#45474c] dark:text-slate-400">
             Loading local recipients...
           </p>
@@ -112,6 +133,7 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
 
       {isAddingRecipient ? (
         <AddRecipientModal
+          ownerWallet={wallet?.address ?? ""}
           onClose={() => setIsAddingRecipient(false)}
           onRecipientAdded={async () => {
             setIsAddingRecipient(false);
@@ -127,11 +149,13 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
 function AddRecipientModal({
   onClose,
   onError,
-  onRecipientAdded
+  onRecipientAdded,
+  ownerWallet
 }: {
   onClose: () => void;
   onError: (error: string | null) => void;
   onRecipientAdded: () => Promise<void>;
+  ownerWallet: string;
 }) {
   const [name, setName] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
@@ -146,10 +170,16 @@ function AddRecipientModal({
       return;
     }
 
+    if (!ownerWallet) {
+      setFormError("Connect wallet before saving a recipient.");
+      return;
+    }
+
     try {
       setIsSaving(true);
       await window.payguardDesktop!.store.addRecipient({
         name: name.trim() || undefined,
+        ownerWallet,
         walletAddress: walletAddress.trim()
       });
       onError(null);

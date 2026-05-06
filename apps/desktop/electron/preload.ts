@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
       ipcRenderer.removeListener("wallet:external-connected", listener);
     };
   },
+  getWalletBalances: (walletAddress: string) =>
+    ipcRenderer.invoke("wallet:get-balances", walletAddress),
   startExternalWalletConnect: () =>
     ipcRenderer.invoke("wallet:start-external-connect"),
   store: {
@@ -26,12 +28,12 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
       ipcRenderer.invoke("store:history:add", input),
     addRecipient: (input: unknown) =>
       ipcRenderer.invoke("store:recipients:add", input),
-    listOnchainImports: () =>
-      ipcRenderer.invoke("store:onchain-imports:list"),
-    listPaymentHistory: () =>
-      ipcRenderer.invoke("store:history:list"),
-    listRecipients: () =>
-      ipcRenderer.invoke("store:recipients:list")
+    listOnchainImports: (ownerWallet: string) =>
+      ipcRenderer.invoke("store:onchain-imports:list", ownerWallet),
+    listPaymentHistory: (ownerWallet: string) =>
+      ipcRenderer.invoke("store:history:list", ownerWallet),
+    listRecipients: (ownerWallet: string) =>
+      ipcRenderer.invoke("store:recipients:list", ownerWallet)
   },
   starterMessage: "Electron React + Tailwind starter is running."
 });

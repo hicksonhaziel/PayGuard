@@ -6,7 +6,7 @@ import type {
   RecipientRagResult,
   RiskVerdict
 } from "@payguard/qvac-agent";
-import type { PaymentDecision, PrefilledRecipient } from "../App";
+import type { ConnectedWallet, PaymentDecision, PrefilledRecipient } from "../App";
 
 type OcrStatus = "idle" | "running" | "complete" | "error";
 type RagStatus = "idle" | "running" | "complete" | "error";
@@ -44,12 +44,14 @@ type RecipientSummary = Awaited<
 >[number];
 
 interface NewPaymentPageProps {
+  wallet: ConnectedWallet | null;
   prefilledRecipient: PrefilledRecipient | null;
   onAnalyze: (decision: PaymentDecision) => void;
   onBack: () => void;
 }
 
 export function NewPaymentPage({
+  wallet,
   prefilledRecipient,
   onAnalyze,
   onBack
@@ -275,7 +277,10 @@ export function NewPaymentPage({
   useEffect(() => {
     async function loadRecipients() {
       try {
-        const savedRecipients = await window.payguardDesktop!.store.listRecipients();
+        setIsLoadingRecipients(true);
+        const savedRecipients = wallet
+          ? await window.payguardDesktop!.store.listRecipients(wallet.address)
+          : [];
         setRecipients(savedRecipients);
 
         if (prefilledRecipient) {
@@ -291,7 +296,7 @@ export function NewPaymentPage({
     }
 
     void loadRecipients();
-  }, [prefilledRecipient]);
+  }, [prefilledRecipient, wallet?.address]);
 
   useEffect(() => {
     return () => {
@@ -325,6 +330,7 @@ export function NewPaymentPage({
             <ManualEntryCard
               draft={paymentDraft}
               isLoadingRecipients={isLoadingRecipients}
+              wallet={wallet}
               onDraftChange={setPaymentDraft}
               recipients={recipients}
             />
@@ -371,6 +377,7 @@ function inferRecipientNameFromOcr(text?: string) {
 interface ManualEntryCardProps {
   draft: PaymentDraft;
   isLoadingRecipients: boolean;
+  wallet: ConnectedWallet | null;
   onDraftChange: (draft: PaymentDraft) => void;
   recipients: RecipientSummary[];
 }
@@ -378,6 +385,7 @@ interface ManualEntryCardProps {
 function ManualEntryCard({
   draft,
   isLoadingRecipients,
+  wallet,
   onDraftChange,
   recipients
 }: ManualEntryCardProps) {
@@ -416,7 +424,9 @@ function ManualEntryCard({
               <option value="">
                 {isLoadingRecipients
                   ? "Loading recipients..."
-                  : recipients.length
+                  : !wallet
+                    ? "Connect wallet to load recipients"
+                    : recipients.length
                     ? "Choose a saved recipient"
                     : "No recipients yet"}
               </option>
@@ -433,6 +443,8 @@ function ManualEntryCard({
           <span className="text-xs text-[#45474c] dark:text-slate-400">
             {recipients.length
               ? "Select a known recipient or paste a new wallet below."
+              : !wallet
+                ? "Connect wallet to load saved recipients, or paste a wallet below."
               : "No recipients yet. You can still paste a wallet below."}
           </span>
         </label>

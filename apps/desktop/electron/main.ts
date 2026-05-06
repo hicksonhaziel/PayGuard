@@ -21,9 +21,17 @@ import {
 const devServerUrl = "http://127.0.0.1:5174";
 const appIconPath = path.join(__dirname, "../assets/icon.png");
 const supportedOcrExtensions = new Set([".png", ".jpg", ".jpeg"]);
+const solanaRpcUrl =
+  process.env.PAYGUARD_SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
+const stablecoinMints = {
+  USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+} as const;
+const balanceCacheTtlMs = Number(process.env.PAYGUARD_BALANCE_CACHE_SECONDS ?? 60) * 1000;
 let walletBridgeServer: http.Server | null = null;
 let walletBridgeTimeout: NodeJS.Timeout | null = null;
 let mainWindow: BrowserWindow | null = null;
+const balanceCache = new Map<string, CachedWalletBalances>();
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 
@@ -121,10 +129,178 @@ function registerWalletHandlers() {
 
     return { url: connectUrl };
   });
+
+  ipcMain.handle("wallet:get-balances", async (_event, walletAddress: unknown) => {
+    if (typeof walletAddress !== "string" || !walletAddress.trim()) {
+      throw new Error("A connected wallet address is required to fetch balances.");
+    }
+
+    return getWalletBalances(walletAddress.trim());
+  });
 }
 
+async function getWalletBalances(walletAddress: string) {
+  const now = Date.now();
+  const cached = balanceCache.get(walletAddress);
+
+  if (cached && cached.expiresAt > now) {
+    return createBalanceResponse(cached, false, {});
+  }
+
+  const [sol, usdc, usdt] = await Promise.allSettled([
+    getSolBalance(walletAddress),
+    getSplTokenBalance(walletAddress, stablecoinMints.USDC),
+    getSplTokenBalance(walletAddress, stablecoinMints.USDT)
+  ]);
+  const errors = {
+    SOL: getBalanceError(sol),
+    USDC: getBalanceError(usdc),
+    USDT: getBalanceError(usdt)
+  };
+  const nextBalances = {
+    SOL: unwrapBalanceResult(sol, cached?.balances.SOL ?? null),
+    USDC: unwrapBalanceResult(usdc, cached?.balances.USDC ?? null),
+    USDT: unwrapBalanceResult(usdt, cached?.balances.USDT ?? null)
+  };
+  const nextCache: CachedWalletBalances = {
+    balances: nextBalances,
+    cachedAt:
+      sol.status === "fulfilled" || usdc.status === "fulfilled" || usdt.status === "fulfilled"
+        ? now
+        : cached?.cachedAt ?? now,
+    expiresAt: now + balanceCacheTtlMs
+  };
+
+  balanceCache.set(walletAddress, nextCache);
+
+  return createBalanceResponse(nextCache, Boolean(cached), errors);
+}
+
+function unwrapBalanceResult(
+  result: PromiseSettledResult<number>,
+  fallback: number | null
+) {
+  return result.status === "fulfilled" ? result.value : fallback;
+}
+
+function getBalanceError(result: PromiseSettledResult<number>) {
+  if (result.status === "fulfilled") {
+    return null;
+  }
+
+  return result.reason instanceof Error ? result.reason.message : "Balance request failed.";
+}
+
+function createBalanceResponse(
+  cached: CachedWalletBalances,
+  isStale: boolean,
+  errors: WalletBalanceErrors
+) {
+  return {
+    ...cached.balances,
+    cachedAt: new Date(cached.cachedAt).toISOString(),
+    errors,
+    expiresAt: new Date(cached.expiresAt).toISOString(),
+    isStale
+  };
+}
+
+async function getSolBalance(walletAddress: string) {
+  const response = await callSolanaRpc<{ value: number }>("getBalance", [
+    walletAddress,
+    { commitment: "confirmed" }
+  ]);
+
+  return response.value / 1_000_000_000;
+}
+
+async function getSplTokenBalance(walletAddress: string, mintAddress: string) {
+  const response = await callSolanaRpc<TokenAccountsByOwnerResult>(
+    "getTokenAccountsByOwner",
+    [
+      walletAddress,
+      { mint: mintAddress },
+      { commitment: "confirmed", encoding: "jsonParsed" }
+    ]
+  );
+
+  return response.value.reduce((total, account) => {
+    const tokenAmount = account.account.data.parsed.info.tokenAmount;
+    const rawAmount = Number(tokenAmount.amount);
+
+    if (!Number.isFinite(rawAmount)) {
+      return total;
+    }
+
+    return total + rawAmount / 10 ** tokenAmount.decimals;
+  }, 0);
+}
+
+async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
+  const response = await fetch(solanaRpcUrl, {
+    body: JSON.stringify({
+      id: crypto.randomUUID(),
+      jsonrpc: "2.0",
+      method,
+      params
+    }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Solana RPC request failed with HTTP ${response.status}.`);
+  }
+
+  const payload = (await response.json()) as {
+    error?: { message?: string };
+    result?: T;
+  };
+
+  if (payload.error) {
+    throw new Error(payload.error.message ?? "Solana RPC returned an error.");
+  }
+
+  if (payload.result === undefined) {
+    throw new Error("Solana RPC did not return a result.");
+  }
+
+  return payload.result;
+}
+
+type TokenAccountsByOwnerResult = {
+  value: Array<{
+    account: {
+      data: {
+        parsed: {
+          info: {
+            tokenAmount: {
+              amount: string;
+              decimals: number;
+            };
+          };
+        };
+      };
+    };
+  }>;
+};
+
+type WalletBalanceSymbol = "SOL" | "USDC" | "USDT";
+
+type WalletBalanceMap = Record<WalletBalanceSymbol, number | null>;
+
+type WalletBalanceErrors = Partial<Record<WalletBalanceSymbol, string | null>>;
+
+type CachedWalletBalances = {
+  balances: WalletBalanceMap;
+  cachedAt: number;
+  expiresAt: number;
+};
+
 function registerLocalStoreHandlers() {
-  ipcMain.handle("store:recipients:list", () => listRecipients());
+  ipcMain.handle("store:recipients:list", (_event, ownerWallet: unknown) =>
+    listRecipients(assertOwnerWallet(ownerWallet))
+  );
 
   ipcMain.handle("store:recipients:add", (_event, input: unknown) => {
     if (!isRecipientInput(input)) {
@@ -134,7 +310,9 @@ function registerLocalStoreHandlers() {
     return addRecipient(input);
   });
 
-  ipcMain.handle("store:history:list", () => listPaymentHistory());
+  ipcMain.handle("store:history:list", (_event, ownerWallet: unknown) =>
+    listPaymentHistory(assertOwnerWallet(ownerWallet))
+  );
 
   ipcMain.handle("store:history:add", (_event, input: unknown) => {
     if (!isPaymentHistoryInput(input)) {
@@ -144,7 +322,17 @@ function registerLocalStoreHandlers() {
     return addPaymentHistory(input);
   });
 
-  ipcMain.handle("store:onchain-imports:list", () => listOnchainImports());
+  ipcMain.handle("store:onchain-imports:list", (_event, ownerWallet: unknown) =>
+    listOnchainImports(assertOwnerWallet(ownerWallet))
+  );
+}
+
+function assertOwnerWallet(ownerWallet: unknown) {
+  if (typeof ownerWallet !== "string" || !ownerWallet.trim()) {
+    throw new Error("A connected wallet address is required.");
+  }
+
+  return ownerWallet.trim();
 }
 
 function isPaymentRagInput(input: unknown): input is PaymentRagInput {
@@ -181,6 +369,8 @@ function isRecipientInput(input: unknown): input is Parameters<typeof addRecipie
   return (
     typeof candidate.walletAddress === "string" &&
     candidate.walletAddress.trim().length > 0 &&
+    typeof candidate.ownerWallet === "string" &&
+    candidate.ownerWallet.trim().length > 0 &&
     (candidate.name === undefined || typeof candidate.name === "string") &&
     (candidate.category === undefined || typeof candidate.category === "string") &&
     (candidate.notes === undefined || typeof candidate.notes === "string")
@@ -208,6 +398,8 @@ function isPaymentHistoryInput(
 
   return (
     typeof candidate.amount === "string" &&
+    typeof candidate.ownerWallet === "string" &&
+    candidate.ownerWallet.trim().length > 0 &&
     typeof candidate.recipientName === "string" &&
     typeof candidate.recipientWallet === "string" &&
     typeof candidate.riskScore === "number" &&
