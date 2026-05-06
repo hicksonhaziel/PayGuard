@@ -9,6 +9,14 @@ import {
   type PaymentRagInput,
   type RiskAnalysisInput
 } from "@payguard/qvac-agent";
+import {
+  addPaymentHistory,
+  addRecipient,
+  listOnchainImports,
+  listPaymentHistory,
+  listRecipients,
+  type StoredPaymentHistory
+} from "./local-store.js";
 
 const devServerUrl = "http://127.0.0.1:5174";
 const appIconPath = path.join(__dirname, "../assets/icon.png");
@@ -115,6 +123,30 @@ function registerWalletHandlers() {
   });
 }
 
+function registerLocalStoreHandlers() {
+  ipcMain.handle("store:recipients:list", () => listRecipients());
+
+  ipcMain.handle("store:recipients:add", (_event, input: unknown) => {
+    if (!isRecipientInput(input)) {
+      throw new Error("Valid recipient name and wallet address are required.");
+    }
+
+    return addRecipient(input);
+  });
+
+  ipcMain.handle("store:history:list", () => listPaymentHistory());
+
+  ipcMain.handle("store:history:add", (_event, input: unknown) => {
+    if (!isPaymentHistoryInput(input)) {
+      throw new Error("Valid payment history details are required.");
+    }
+
+    return addPaymentHistory(input);
+  });
+
+  ipcMain.handle("store:onchain-imports:list", () => listOnchainImports());
+}
+
 function isPaymentRagInput(input: unknown): input is PaymentRagInput {
   if (!input || typeof input !== "object") {
     return false;
@@ -136,6 +168,59 @@ function isRiskAnalysisInput(input: unknown): input is RiskAnalysisInput {
   return (
     isPaymentRagInput(candidate.payment) &&
     (candidate.ocrText === undefined || typeof candidate.ocrText === "string")
+  );
+}
+
+function isRecipientInput(input: unknown): input is Parameters<typeof addRecipient>[0] {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+
+  return (
+    typeof candidate.walletAddress === "string" &&
+    candidate.walletAddress.trim().length > 0 &&
+    (candidate.name === undefined || typeof candidate.name === "string") &&
+    (candidate.category === undefined || typeof candidate.category === "string") &&
+    (candidate.notes === undefined || typeof candidate.notes === "string")
+  );
+}
+
+function isPaymentHistoryInput(
+  input: unknown
+): input is Parameters<typeof addPaymentHistory>[0] {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+  const validRoutes: StoredPaymentHistory["route"][] = [
+    "Direct Send",
+    "Guarded Payment",
+    "Block"
+  ];
+  const validVerdicts: StoredPaymentHistory["verdict"][] = [
+    "Safe",
+    "Review",
+    "Block"
+  ];
+
+  return (
+    typeof candidate.amount === "string" &&
+    typeof candidate.recipientName === "string" &&
+    typeof candidate.recipientWallet === "string" &&
+    typeof candidate.riskScore === "number" &&
+    typeof candidate.summary === "string" &&
+    typeof candidate.token === "string" &&
+    validRoutes.includes(candidate.route as StoredPaymentHistory["route"]) &&
+    validVerdicts.includes(candidate.verdict as StoredPaymentHistory["verdict"]) &&
+    (candidate.senderWallet === undefined || typeof candidate.senderWallet === "string") &&
+    (candidate.txSignature === undefined || typeof candidate.txSignature === "string") &&
+    (candidate.source === undefined ||
+      candidate.source === "manual" ||
+      candidate.source === "payguard" ||
+      candidate.source === "onchain-import")
   );
 }
 
@@ -381,6 +466,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId("com.payguard.desktop");
   registerQvacHandlers();
   registerWalletHandlers();
+  registerLocalStoreHandlers();
   createWindow();
 
   app.on("activate", () => {

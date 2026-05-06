@@ -1,12 +1,16 @@
+import { useEffect, useRef } from "react";
 import type { PaymentDecision } from "../App";
+import type { ConnectedWallet } from "../App";
 
 interface SuccessPageProps {
   decision: PaymentDecision | null;
+  wallet: ConnectedWallet | null;
   onNewPayment: () => void;
 }
 
-export function SuccessPage({ decision, onNewPayment }: SuccessPageProps) {
+export function SuccessPage({ decision, wallet, onNewPayment }: SuccessPageProps) {
   const displayDecision = decision ?? createFallbackDecision();
+  const savedReceiptRef = useRef(false);
   const receiptDetails = [
     {
       label: "Security Verdict",
@@ -27,6 +31,27 @@ export function SuccessPage({ decision, onNewPayment }: SuccessPageProps) {
       value: `${displayDecision.verdict.riskScore}/100`
     }
   ] as const;
+
+  useEffect(() => {
+    if (!decision || savedReceiptRef.current) {
+      return;
+    }
+
+    savedReceiptRef.current = true;
+    void window.payguardDesktop?.store.addPaymentHistory({
+      amount: decision.amount,
+      recipientName: decision.recipientName,
+      recipientWallet: decision.walletAddress,
+      riskScore: decision.verdict.riskScore,
+      route: decision.selectedRoute,
+      senderWallet: wallet?.address ?? "",
+      source: "payguard",
+      summary: decision.verdict.summary,
+      token: decision.token,
+      txSignature: `demo-${crypto.randomUUID()}`,
+      verdict: decision.verdict.verdict
+    });
+  }, [decision, wallet?.address]);
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] px-6 py-5 dark:bg-[#0f172a]">

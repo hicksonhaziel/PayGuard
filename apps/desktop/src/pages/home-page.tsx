@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityCard } from "../components/home/activity-card";
 import { TrustedSupplier } from "../components/home/trusted-supplier";
-import type { ConnectedWallet } from "../App";
+import type { ConnectedWallet, PrefilledRecipient } from "../App";
 
 const recentActivity = [
   {
@@ -33,19 +33,17 @@ const recentActivity = [
   }
 ] as const;
 
-const trustedRecipients = [
-  { icon: "cloud", lastActivity: "Oct 05", name: "Cloud Services" },
-  { icon: "memory", lastActivity: "Sep 28", name: "Hardware Inc" },
-  { icon: "brush", lastActivity: "Sep 15", name: "Creative Studio" },
-  { icon: "business", lastActivity: "Aug 30", name: "Office Rentals" }
-] as const;
+type RecipientSummary = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
+>[number];
 
 interface HomePageProps {
   wallet: ConnectedWallet | null;
   walletError: string | null;
   onConnectWallet: () => void;
   onDisconnectWallet: () => void;
-  onStartPayment: () => void;
+  onStartPayment: (recipient?: PrefilledRecipient) => void;
+  onViewRecipients: () => void;
 }
 
 export function HomePage({
@@ -53,8 +51,24 @@ export function HomePage({
   walletError,
   onConnectWallet,
   onDisconnectWallet,
-  onStartPayment
+  onStartPayment,
+  onViewRecipients
 }: HomePageProps) {
+  const [trustedRecipients, setTrustedRecipients] = useState<RecipientSummary[]>([]);
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(true);
+
+  useEffect(() => {
+    async function loadRecipients() {
+      try {
+        setTrustedRecipients(await window.payguardDesktop!.store.listRecipients());
+      } finally {
+        setIsLoadingRecipients(false);
+      }
+    }
+
+    void loadRecipients();
+  }, []);
+
   return (
     <>
       <main className="min-h-[calc(100vh-64px)] bg-[radial-gradient(at_0%_0%,rgba(16,185,129,0.05)_0,transparent_50%),radial-gradient(at_100%_0%,rgba(26,32,44,0.03)_0,transparent_50%),#f7fafc] dark:bg-[radial-gradient(at_0%_0%,rgba(111,251,190,0.08)_0,transparent_45%),radial-gradient(at_100%_0%,rgba(148,163,184,0.08)_0,transparent_45%),#0f172a]">
@@ -129,9 +143,32 @@ export function HomePage({
                 Trusted Recipients
               </h2>
               <div className="grid grid-cols-4 gap-2 max-lg:grid-cols-2 max-md:grid-cols-1">
-                {trustedRecipients.map((recipient) => (
-                  <TrustedSupplier key={recipient.name} {...recipient} />
-                ))}
+                {isLoadingRecipients ? (
+                  <p className="col-span-full text-sm text-[#45474c] dark:text-slate-400">
+                    Loading trusted recipients...
+                  </p>
+                ) : trustedRecipients.length ? (
+                  trustedRecipients.slice(0, 4).map((recipient) => (
+                    <TrustedSupplier
+                      icon="account_balance_wallet"
+                      key={recipient.walletAddress}
+                      lastActivity={recipient.lastPayment}
+                      name={recipient.name}
+                      walletAddress={recipient.walletAddress}
+                      onStartPayment={() =>
+                        onStartPayment({
+                          name: recipient.name,
+                          walletAddress: recipient.walletAddress
+                        })
+                      }
+                      onViewDetails={onViewRecipients}
+                    />
+                  ))
+                ) : (
+                  <div className="col-span-full rounded-xl border border-dashed border-[#c6c6cc] bg-white/70 px-4 py-5 text-sm text-[#45474c] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+                    No recipients yet. Add a recipient from the Recipients page to build trusted history.
+                  </div>
+                )}
               </div>
             </div>
           </section>

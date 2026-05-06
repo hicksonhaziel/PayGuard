@@ -1,38 +1,37 @@
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import type { PrefilledRecipient } from "../App";
+
 interface RecipientsPageProps {
-  onStartPayment: () => void;
+  onStartPayment: (recipient?: PrefilledRecipient) => void;
 }
 
-const recipients = [
-  {
-    averageAmount: "1,200.00 USDT",
-    initial: "A",
-    lastPayment: "Oct 12, 2023",
-    name: "Alpha Cloud Services",
-    payments: "24",
-    verified: true,
-    wallet: "0x7a...4f9e"
-  },
-  {
-    averageAmount: "4,500.00 USDC",
-    initial: "N",
-    lastPayment: "Sep 28, 2023",
-    name: "Nexus Data Group",
-    payments: "8",
-    verified: true,
-    wallet: "0x3b...9d21"
-  },
-  {
-    averageAmount: "150.00 ETH",
-    initial: "U",
-    lastPayment: "Jan 04, 2023",
-    name: "Unnamed",
-    payments: "1",
-    verified: false,
-    wallet: "0x1c...77ef"
-  }
-] as const;
+type RecipientSummary = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
+>[number];
 
 export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
+  const [recipients, setRecipients] = useState<RecipientSummary[]>([]);
+  const [isAddingRecipient, setIsAddingRecipient] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadRecipients() {
+    try {
+      setIsLoading(true);
+      setRecipients(await window.payguardDesktop!.store.listRecipients());
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load recipients.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadRecipients();
+  }, []);
+
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-5 dark:bg-[#0f172a] max-lg:px-5">
       <div className="mx-auto w-full max-w-[1200px]">
@@ -59,6 +58,7 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
             </label>
             <button
               className="flex items-center justify-center gap-1.5 rounded-lg bg-[#1a202c] px-3.5 py-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-[#6ffbbe] dark:text-[#002113]"
+              onClick={() => setIsAddingRecipient(true)}
               type="button"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>
@@ -67,73 +67,221 @@ export function RecipientsPage({ onStartPayment }: RecipientsPageProps) {
           </div>
         </section>
 
-        <section className="grid grid-cols-3 gap-3 max-lg:grid-cols-2 max-md:grid-cols-1">
-          {recipients.map((recipient) => (
-            <RecipientCard
-              key={recipient.wallet}
-              onStartPayment={onStartPayment}
-              {...recipient}
-            />
-          ))}
-        </section>
+        {error ? (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-[#9f1239] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-200">
+            {error}
+          </div>
+        ) : null}
+
+        {isLoading ? (
+          <p className="text-sm text-[#45474c] dark:text-slate-400">
+            Loading local recipients...
+          </p>
+        ) : recipients.length ? (
+          <section className="grid grid-cols-3 gap-3 max-lg:grid-cols-2 max-md:grid-cols-1">
+            {recipients.map((recipient) => (
+              <RecipientCard
+                key={recipient.walletAddress}
+                onStartPayment={onStartPayment}
+                {...recipient}
+              />
+            ))}
+          </section>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#c6c6cc] bg-white p-8 text-center shadow-[0_4px_20px_rgba(26,32,44,0.04)] dark:border-white/10 dark:bg-[#111827]">
+            <span className="material-symbols-outlined mb-2 text-4xl text-[#76777c] dark:text-slate-400">
+              group
+            </span>
+            <h2 className="mb-1 font-['Manrope'] text-lg font-bold text-[#030813] dark:text-white">
+              No recipients yet
+            </h2>
+            <p className="mx-auto mb-4 max-w-md text-sm leading-6 text-[#45474c] dark:text-slate-400">
+              Add a recipient wallet to start building trusted local payment history.
+            </p>
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#1a202c] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-[#6ffbbe] dark:text-[#002113]"
+              onClick={() => setIsAddingRecipient(true)}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[18px]">add</span>
+              Add Recipient
+            </button>
+          </div>
+        )}
       </div>
+
+      {isAddingRecipient ? (
+        <AddRecipientModal
+          onClose={() => setIsAddingRecipient(false)}
+          onRecipientAdded={async () => {
+            setIsAddingRecipient(false);
+            await loadRecipients();
+          }}
+          onError={setError}
+        />
+      ) : null}
     </main>
   );
 }
 
-interface RecipientCardProps {
-  averageAmount: string;
-  initial: string;
-  lastPayment: string;
-  name: string;
-  onStartPayment: () => void;
-  payments: string;
-  verified: boolean;
-  wallet: string;
+function AddRecipientModal({
+  onClose,
+  onError,
+  onRecipientAdded
+}: {
+  onClose: () => void;
+  onError: (error: string | null) => void;
+  onRecipientAdded: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [walletAddress, setWalletAddress] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function submitRecipient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!walletAddress.trim()) {
+      setFormError("Wallet address is required.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await window.payguardDesktop!.store.addRecipient({
+        name: name.trim() || undefined,
+        walletAddress: walletAddress.trim()
+      });
+      onError(null);
+      await onRecipientAdded();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not add recipient.";
+      setFormError(message);
+      onError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#030813]/45 px-4 backdrop-blur-sm">
+      <form
+        className="w-full max-w-md rounded-2xl border border-[#e5e9eb] bg-white p-5 shadow-[0_20px_70px_rgba(3,8,19,0.25)] dark:border-white/10 dark:bg-[#111827]"
+        onSubmit={submitRecipient}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-['Manrope'] text-xl font-bold text-[#030813] dark:text-white">
+              Add Recipient
+            </h2>
+            <p className="mt-1 text-sm leading-5 text-[#45474c] dark:text-slate-400">
+              Save a trusted wallet locally for future payment checks.
+            </p>
+          </div>
+          <button
+            className="pg-icon-button"
+            onClick={onClose}
+            type="button"
+            aria-label="Close"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div className="grid gap-4">
+          <label className="grid gap-2">
+            <span className="pg-field-label">Name optional</span>
+            <input
+              className="pg-input"
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Acme Store"
+              type="text"
+              value={name}
+            />
+          </label>
+
+          <label className="grid gap-2">
+            <span className="pg-field-label">Wallet Address</span>
+            <input
+              className="pg-input font-mono"
+              onChange={(event) => setWalletAddress(event.target.value)}
+              placeholder="Paste Solana wallet address"
+              type="text"
+              value={walletAddress}
+            />
+          </label>
+        </div>
+
+        {formError ? (
+          <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-[#9f1239] dark:bg-rose-500/10 dark:text-rose-200">
+            {formError}
+          </p>
+        ) : null}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            className="rounded-lg border border-[#c6c6cc] px-4 py-2 text-sm font-semibold text-[#030813] transition-colors hover:bg-[#f1f4f6] dark:border-white/10 dark:text-white dark:hover:bg-white/10"
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="rounded-lg bg-[#1a202c] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#6ffbbe] dark:text-[#002113]"
+            disabled={isSaving}
+            type="submit"
+          >
+            {isSaving ? "Saving..." : "Save Recipient"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
+
+type RecipientCardProps = RecipientSummary & {
+  onStartPayment: (recipient?: PrefilledRecipient) => void;
+};
 
 function RecipientCard({
   averageAmount,
-  initial,
   lastPayment,
   name,
   onStartPayment,
   payments,
-  verified,
-  wallet
+  walletAddress
 }: RecipientCardProps) {
+  const initial = name.slice(0, 1).toUpperCase();
+
   return (
     <article className="flex min-h-[260px] flex-col justify-between rounded-2xl border border-[#e0e3e5] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] transition-shadow hover:shadow-[0_8px_30px_rgba(26,32,44,0.08)] dark:border-white/10 dark:bg-[#111827]">
       <div>
         <div className="mb-4 flex items-start justify-between">
           <div
             className={`flex h-10 w-10 items-center justify-center rounded-full font-['Manrope'] text-lg font-semibold ${
-              verified
-                ? "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
-                : "bg-[#e0e3e5] text-[#45474c] dark:bg-white/10 dark:text-slate-400"
+              "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
             }`}
           >
             {initial}
           </div>
-          {verified ? (
-            <span className="flex items-center gap-1 rounded-full bg-[#006c49]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]">
-              <span className="material-symbols-outlined text-[14px]">
-                verified
-              </span>
-              Verified
+          <span className="flex items-center gap-1 rounded-full bg-[#006c49]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]">
+            <span className="material-symbols-outlined text-[14px]">
+              verified
             </span>
-          ) : null}
+            Trusted
+          </span>
         </div>
 
         <h3 className="mb-1 font-['Manrope'] text-base font-semibold text-[#181c1e] dark:text-white">
           {name}
         </h3>
         <p className="mb-4 inline-block rounded bg-[#f1f4f6] px-2 py-1 font-mono text-[11px] text-[#45474c] dark:bg-white/[0.04] dark:text-slate-400">
-          {wallet}
+          {formatWallet(walletAddress)}
         </p>
 
         <div className="mb-4 space-y-0.5">
-          <RecipientStat label="Total Payments" value={payments} />
+          <RecipientStat label="Total Payments" value={String(payments)} />
           <RecipientStat label="Last Payment" value={lastPayment} />
           <RecipientStat label="Avg Amount" value={averageAmount} />
         </div>
@@ -141,7 +289,7 @@ function RecipientCard({
 
       <button
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#1a202c] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-[#6ffbbe] dark:text-[#002113]"
-        onClick={onStartPayment}
+        onClick={() => onStartPayment({ name, walletAddress })}
         type="button"
       >
         <span className="material-symbols-outlined text-[18px]">send</span>
@@ -149,6 +297,14 @@ function RecipientCard({
       </button>
     </article>
   );
+}
+
+function formatWallet(walletAddress: string) {
+  if (walletAddress.length <= 14) {
+    return walletAddress;
+  }
+
+  return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
 }
 
 interface RecipientStatProps {

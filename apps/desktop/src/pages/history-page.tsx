@@ -1,42 +1,31 @@
+import { useEffect, useState } from "react";
+
 const historyTabs = ["All Payments", "Direct", "Guarded", "Blocked"];
 
-const transactions = [
-  {
-    amount: "2,450.00 USDT",
-    action: "View Receipt",
-    date: "Oct 24, 2024 - 14:32",
-    hash: "0x7a...4f9e",
-    icon: "arrow_upward",
-    recipient: "Alpha Cloud Services",
-    route: "Direct Send",
-    status: "Safe",
-    tone: "safe"
-  },
-  {
-    amount: "12,000.00 USDT",
-    action: "View Receipt",
-    date: "Oct 23, 2024 - 09:15",
-    hash: "0x9b...2c1a",
-    icon: "arrow_upward",
-    recipient: "Nexus Data Group",
-    route: "Guarded Payment",
-    status: "Safe",
-    tone: "safe"
-  },
-  {
-    amount: "500.00 USDT",
-    action: "View Details",
-    date: "Oct 21, 2024 - 18:45",
-    hash: "0xd4...8e7f",
-    icon: "block",
-    recipient: "Unknown Recipient",
-    route: "Direct Send",
-    status: "Blocked",
-    tone: "blocked"
-  }
-] as const;
+type StoredPaymentHistory = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listPaymentHistory"]>
+>[number];
 
 export function HistoryPage() {
+  const [transactions, setTransactions] = useState<StoredPaymentHistory[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadHistory() {
+      try {
+        setTransactions(await window.payguardDesktop!.store.listPaymentHistory());
+        setError(null);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load history.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void loadHistory();
+  }, []);
+
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-6 dark:bg-[#0f172a] max-lg:px-5">
       <div className="mx-auto w-full max-w-[1200px]">
@@ -87,40 +76,37 @@ export function HistoryPage() {
           ))}
         </nav>
 
-        <section className="grid gap-3">
-          {transactions.map((transaction) => (
-            <TransactionCard key={transaction.hash} {...transaction} />
-          ))}
-        </section>
+        {error ? (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-[#9f1239] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-200">
+            {error}
+          </div>
+        ) : isLoading ? (
+          <p className="text-sm text-[#45474c] dark:text-slate-400">
+            Loading local payment history...
+          </p>
+        ) : transactions.length ? (
+          <section className="grid gap-3">
+            {transactions.map((transaction) => (
+              <TransactionCard key={transaction.id} transaction={transaction} />
+            ))}
+          </section>
+        ) : (
+          <div className="rounded-2xl border border-[#e0e3e5] bg-white p-6 text-sm text-[#45474c] dark:border-white/10 dark:bg-[#111827] dark:text-slate-400">
+            No PayGuard payment history yet.
+          </div>
+        )}
       </div>
     </main>
   );
 }
 
 interface TransactionCardProps {
-  action: string;
-  amount: string;
-  date: string;
-  hash: string;
-  icon: string;
-  recipient: string;
-  route: string;
-  status: string;
-  tone: "safe" | "blocked";
+  transaction: StoredPaymentHistory;
 }
 
-function TransactionCard({
-  action,
-  amount,
-  date,
-  hash,
-  icon,
-  recipient,
-  route,
-  status,
-  tone
-}: TransactionCardProps) {
-  const isBlocked = tone === "blocked";
+function TransactionCard({ transaction }: TransactionCardProps) {
+  const isBlocked = transaction.verdict === "Block";
+  const icon = isBlocked ? "block" : "arrow_upward";
 
   return (
     <article className="rounded-2xl border border-[#e0e3e5] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] transition-shadow hover:shadow-[0_8px_30px_rgba(26,32,44,0.08)] dark:border-white/10 dark:bg-[#111827]">
@@ -139,17 +125,17 @@ function TransactionCard({
           </div>
           <div>
             <h3 className="m-0 text-sm font-semibold text-[#181c1e] dark:text-white">
-              {recipient}
+              {transaction.recipientName}
             </h3>
             <p className="mt-1 text-xs text-[#45474c] dark:text-slate-400">
-              {date}
+              {formatDate(transaction.paidAt)}
             </p>
           </div>
         </div>
 
         <div className="flex flex-1 flex-col gap-1 md:items-end">
           <span className="font-['Manrope'] text-[18px] font-semibold leading-tight text-[#181c1e] dark:text-white">
-            {amount}
+            {transaction.amount} {transaction.token}
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -159,12 +145,14 @@ function TransactionCard({
                   : "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
               }`}
             >
-              {status}
+              {transaction.verdict}
             </span>
             <span className="text-xs text-[#76777c] dark:text-slate-400">
-              {route}
+              {transaction.route}
             </span>
-            <span className="text-xs text-[#c6c6cc]"># {hash}</span>
+            <span className="text-xs text-[#c6c6cc]">
+              # {formatSignature(transaction.txSignature)}
+            </span>
           </div>
         </div>
 
@@ -172,9 +160,27 @@ function TransactionCard({
           className="w-full whitespace-nowrap rounded-lg border border-[#1a202c] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-[#1a202c] transition-colors hover:bg-[#ebeef0] dark:border-white/80 dark:text-white dark:hover:bg-white/10 md:w-auto"
           type="button"
         >
-          {action}
+          View Receipt
         </button>
       </div>
     </article>
   );
+}
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleString(undefined, {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+
+function formatSignature(signature: string) {
+  if (signature.length <= 14) {
+    return signature;
+  }
+
+  return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
 }

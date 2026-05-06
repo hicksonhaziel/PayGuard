@@ -6,7 +6,7 @@ import type {
   RecipientRagResult,
   RiskVerdict
 } from "@payguard/qvac-agent";
-import type { PaymentDecision } from "../App";
+import type { PaymentDecision, PrefilledRecipient } from "../App";
 
 type OcrStatus = "idle" | "running" | "complete" | "error";
 type RagStatus = "idle" | "running" | "complete" | "error";
@@ -39,35 +39,24 @@ type PaymentDraft = {
   memo: string;
 };
 
+type RecipientSummary = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
+>[number];
+
 interface NewPaymentPageProps {
+  prefilledRecipient: PrefilledRecipient | null;
   onAnalyze: (decision: PaymentDecision) => void;
   onBack: () => void;
 }
 
-const pastRecipients = [
-  {
-    label: "Acme Store",
-    wallet: "7xK9mPZrLs8Qa4NdTz6Vu1JcBf3We9HyRkSMn2PaQ4pL"
-  },
-  {
-    label: "Alpha Solutions",
-    wallet: "0xA17...82F9"
-  },
-  {
-    label: "Cloud Services",
-    wallet: "0x71C...3921"
-  },
-  {
-    label: "Hardware Inc",
-    wallet: "0xB28...10AC"
-  }
-] as const;
-
 export function NewPaymentPage({
+  prefilledRecipient,
   onAnalyze,
   onBack
 }: NewPaymentPageProps) {
   const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
+  const [recipients, setRecipients] = useState<RecipientSummary[]>([]);
+  const [isLoadingRecipients, setIsLoadingRecipients] = useState(true);
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft>({
     selectedRecipientWallet: "",
     walletAddress: "",
@@ -284,6 +273,27 @@ export function NewPaymentPage({
   }
 
   useEffect(() => {
+    async function loadRecipients() {
+      try {
+        const savedRecipients = await window.payguardDesktop!.store.listRecipients();
+        setRecipients(savedRecipients);
+
+        if (prefilledRecipient) {
+          setPaymentDraft((currentDraft) => ({
+            ...currentDraft,
+            selectedRecipientWallet: prefilledRecipient.walletAddress,
+            walletAddress: prefilledRecipient.walletAddress
+          }));
+        }
+      } finally {
+        setIsLoadingRecipients(false);
+      }
+    }
+
+    void loadRecipients();
+  }, [prefilledRecipient]);
+
+  useEffect(() => {
     return () => {
       if (uploadedDocument?.previewUrl) {
         URL.revokeObjectURL(uploadedDocument.previewUrl);
@@ -312,7 +322,12 @@ export function NewPaymentPage({
 
         <div className="grid grid-cols-12 gap-5 max-lg:grid-cols-1">
           <div className="col-span-7 flex flex-col gap-3 max-lg:col-span-1">
-            <ManualEntryCard draft={paymentDraft} onDraftChange={setPaymentDraft} />
+            <ManualEntryCard
+              draft={paymentDraft}
+              isLoadingRecipients={isLoadingRecipients}
+              onDraftChange={setPaymentDraft}
+              recipients={recipients}
+            />
           </div>
 
           <aside className="col-span-5 flex min-h-full flex-col gap-3 max-lg:col-span-1">
@@ -355,10 +370,17 @@ function inferRecipientNameFromOcr(text?: string) {
 
 interface ManualEntryCardProps {
   draft: PaymentDraft;
+  isLoadingRecipients: boolean;
   onDraftChange: (draft: PaymentDraft) => void;
+  recipients: RecipientSummary[];
 }
 
-function ManualEntryCard({ draft, onDraftChange }: ManualEntryCardProps) {
+function ManualEntryCard({
+  draft,
+  isLoadingRecipients,
+  onDraftChange,
+  recipients
+}: ManualEntryCardProps) {
   function selectPastRecipient(wallet: string) {
     onDraftChange({
       ...draft,
@@ -391,10 +413,16 @@ function ManualEntryCard({ draft, onDraftChange }: ManualEntryCardProps) {
               onChange={(event) => selectPastRecipient(event.target.value)}
               value={draft.selectedRecipientWallet}
             >
-              <option value="">Choose a saved recipient</option>
-              {pastRecipients.map((recipient) => (
-                <option key={recipient.wallet} value={recipient.wallet}>
-                  {recipient.label} - {recipient.wallet}
+              <option value="">
+                {isLoadingRecipients
+                  ? "Loading recipients..."
+                  : recipients.length
+                    ? "Choose a saved recipient"
+                    : "No recipients yet"}
+              </option>
+              {recipients.map((recipient) => (
+                <option key={recipient.walletAddress} value={recipient.walletAddress}>
+                  {recipient.name} - {formatWallet(recipient.walletAddress)}
                 </option>
               ))}
             </select>
@@ -403,7 +431,9 @@ function ManualEntryCard({ draft, onDraftChange }: ManualEntryCardProps) {
             </span>
           </span>
           <span className="text-xs text-[#45474c] dark:text-slate-400">
-            Select a known recipient or paste a new wallet below.
+            {recipients.length
+              ? "Select a known recipient or paste a new wallet below."
+              : "No recipients yet. You can still paste a wallet below."}
           </span>
         </label>
 
@@ -474,6 +504,14 @@ function ManualEntryCard({ draft, onDraftChange }: ManualEntryCardProps) {
       </form>
     </section>
   );
+}
+
+function formatWallet(walletAddress: string) {
+  if (walletAddress.length <= 14) {
+    return walletAddress;
+  }
+
+  return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
 }
 
 interface UploadCardProps {

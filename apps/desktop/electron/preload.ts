@@ -21,5 +21,17 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
   },
   startExternalWalletConnect: () =>
     ipcRenderer.invoke("wallet:start-external-connect"),
+  store: {
+    addPaymentHistory: (input: unknown) =>
+      ipcRenderer.invoke("store:history:add", input),
+    addRecipient: (input: unknown) =>
+      ipcRenderer.invoke("store:recipients:add", input),
+    listOnchainImports: () =>
+      ipcRenderer.invoke("store:onchain-imports:list"),
+    listPaymentHistory: () =>
+      ipcRenderer.invoke("store:history:list"),
+    listRecipients: () =>
+      ipcRenderer.invoke("store:recipients:list")
+  },
   starterMessage: "Electron React + Tailwind starter is running."
 });

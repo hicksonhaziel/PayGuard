@@ -25,6 +25,10 @@ export type ConnectedWallet = {
   label: string;
   provider: "phantom" | "solflare" | "injected";
 };
+export type PrefilledRecipient = {
+  name: string;
+  walletAddress: string;
+};
 export type PaymentDecision = {
   amount: string;
   token: string;
@@ -52,6 +56,8 @@ export default function App() {
   const [visibleScreen, setVisibleScreen] = useState<AppScreen>("home");
   const [paymentDecision, setPaymentDecision] =
     useState<PaymentDecision | null>(null);
+  const [prefilledRecipient, setPrefilledRecipient] =
+    useState<PrefilledRecipient | null>(null);
   const [connectedWallet, setConnectedWallet] =
     useState<ConnectedWallet | null>(() => loadStoredWallet());
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -102,9 +108,10 @@ export default function App() {
     setActiveScreen(screen);
   }
 
-  function startNewPayment() {
+  function startNewPayment(recipient?: PrefilledRecipient) {
     setTransitionDirection("forward");
     setPaymentDecision(null);
+    setPrefilledRecipient(recipient ?? null);
     setActiveScreen("new-payment");
   }
 
@@ -223,6 +230,7 @@ export default function App() {
             onConnectWallet={connectWallet}
             onDisconnectWallet={disconnectWallet}
             onStartPayment={startNewPayment}
+            onViewRecipients={() => navigateTo("recipients")}
           />
         ) : visibleScreen === "history" ? (
           <HistoryPage />
@@ -246,10 +254,12 @@ export default function App() {
         ) : visibleScreen === "success" ? (
           <SuccessPage
             decision={paymentDecision}
-            onNewPayment={startNewPayment}
+            wallet={connectedWallet}
+            onNewPayment={() => startNewPayment()}
           />
         ) : (
           <NewPaymentPage
+            prefilledRecipient={prefilledRecipient}
             onBack={() => navigateTo("home")}
             onAnalyze={completeRiskAnalysis}
           />
