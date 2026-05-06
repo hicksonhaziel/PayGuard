@@ -2,7 +2,7 @@
 
 ## One-line pitch
 
-**QVAC PayGuard is a non-custodial Solana payment safety layer that uses local QVAC AI to read invoices and screenshots on-device, accept voice commands, analyze risk with local RAG, explain verdicts verbally, and route risky stablecoin transfers into guarded payments instead of blind direct sends.**
+**QVAC PayGuard is a non-custodial Solana payment safety layer that uses local QVAC AI to read invoices and screenshots on-device, compare payment context against trusted history with local RAG, explain risk verdicts with local LLM reasoning, and route risky stablecoin transfers into guarded payments instead of blind direct sends.**
 
 ---
 
@@ -17,7 +17,7 @@ The goal is to win by proving one thing clearly:
 The product must show a real stablecoin payment flow where:
 
 * private payment context stays local
-* QVAC performs meaningful product work (OCR, STT, embeddings/RAG, LLM reasoning, TTS) before signature
+* QVAC performs meaningful product work (OCR, embeddings/RAG, LLM reasoning) before signature
 * Solana executes the actual payment or guarded-payment fallback
 
 ---
@@ -43,22 +43,20 @@ Requirements:
 
 * Ship as an **Electron desktop app**
 * Support reliable non-custodial Solana signing (Phantom/Solflare)
-* Accept payment via voice or manual entry + document upload
+* Accept payment via manual entry + document upload
 * Run local QVAC OCR on invoices/screenshots
 * Run local QVAC risk analysis with lightweight RAG
 * Show verdict: `Safe`, `Review`, or `Block`
 * Let user choose `Direct Send` or `Guarded Payment`
 * Complete real Solana devnet stablecoin flow
-* Generate local receipt with option to listen to summary
+* Generate local receipt
 * Include **History** and **Trusted Recipients** management pages
 
 ### QVAC Capabilities Used
 
 * **OCR** — extract text from invoices and screenshots
-* **Speech-to-Text** — voice payment input
 * **Embeddings + RAG** — compare against local trusted recipient history
 * **LLM Inference** — risk reasoning and natural explanations
-* **Text-to-Speech** — read verdicts and summaries aloud
 
 All processing is fully local.
 
@@ -71,6 +69,7 @@ Do not spend time on:
 * Browser extension
 * Translation
 * Full wallet replacement
+* Audio input/output features
 * Advanced multi-step agent workflows
 * Complex dispute resolution
 
@@ -91,14 +90,14 @@ It answers the critical questions:
 
 ## Why QVAC matters
 
-Private data (invoices, chat screenshots, recipient history, voice input) stays on-device. Cloud AI would destroy the privacy value proposition. QVAC enables the entire intelligent pre-sign layer locally.
+Private data (invoices, chat screenshots, recipient history, payment notes) stays on-device. Cloud AI would destroy the privacy value proposition. QVAC enables the entire intelligent pre-sign layer locally.
 
 ---
 
 ## App Screens
 
 1. **Home / Dashboard**
-2. **New Payment** (voice + manual + upload)
+2. **New Payment** (manual + upload)
 3. **Processing**
 4. **Verdict**
 5. **Payment Confirmation**
@@ -111,25 +110,25 @@ Private data (invoices, chat screenshots, recipient history, voice input) stays 
 ## MVP user flow
 
 1. Connect wallet (non-custodial)
-2. Create payment request (voice command or manual + upload document)
+2. Create payment request (manual entry or upload document)
 3. Run local QVAC analysis (OCR → RAG → LLM reasoning)
-4. View verdict + hear spoken explanation (TTS)
+4. View verdict + explanation
 5. Choose payment mode (Direct Send or Guarded Payment)
 6. Sign transaction on Solana devnet
-7. Receive local receipt (with listen option)
+7. Receive local receipt
 
 ---
 
 ## Recommended demo flows
 
 **Demo 1: Safe Payment**  
-Voice or upload clean invoice → OCR + RAG match → Safe verdict → Direct Send
+Upload clean invoice → OCR + RAG match → Safe verdict → Direct Send
 
 **Demo 2: Scam Attempt**  
 Upload suspicious screenshot → OCR detects urgency + new wallet → Block verdict
 
 **Demo 3: First-time Recipient**  
-New recipient via voice → Review verdict → Choose Guarded Payment → Escrow on devnet
+Manual first-time recipient or uploaded invoice → Review verdict → Choose Guarded Payment → Escrow on devnet
 
 **Demo 4 (Bonus)**: Browse History and Trusted Recipients to show persistence.
 
@@ -138,11 +137,11 @@ New recipient via voice → Review verdict → Choose Guarded Payment → Escrow
 ## Judging strategy
 
 Judges should clearly see:
-* **Strong QVAC integration** — 5 capabilities working together meaningfully
+* **Strong QVAC integration** — OCR, embeddings/RAG, and LLM reasoning working together meaningfully
 * **Real utility** for stablecoin users (freelancers/merchants)
 * **On-chain impact** — AI decision changes payment path
 * **Privacy & local-first** — everything processed on-device
-* **Polished UX** with voice input and spoken output
+* **Polished UX** with a clear pre-sign review flow
 
 ---
 
@@ -150,15 +149,13 @@ Judges should clearly see:
 
 ### apps/desktop
 * Electron shell + all UI screens
-* Voice handling, file upload, receipt storage
+* File upload, receipt storage
 * Navigation between Dashboard, New Payment, History, Recipients
 
 ### apps/qvac-agent
 * QVAC OCR wrapper
-* Speech-to-Text
 * Embeddings + lightweight RAG
 * LLM risk analysis
-* Text-to-Speech
 * Result formatting
 
 ### programs/payguard_escrow
@@ -174,7 +171,7 @@ Judges should clearly see:
 ## Submission positioning
 
 **PayGuard is a local-first desktop payment safety layer for Solana stablecoin users.**  
-It lets you speak a payment, reads invoices/screenshots on-device with QVAC, analyzes risk using local RAG, explains decisions verbally, and intelligently routes payments (direct or guarded) — all while keeping sensitive data private.
+It reads invoices/screenshots on-device with QVAC, analyzes risk using local RAG, explains decisions with local LLM reasoning, and intelligently routes payments (direct or guarded) — all while keeping sensitive data private.
 
 This is the strongest version for the sidetrack.
 
@@ -182,4 +179,4 @@ This is the strongest version for the sidetrack.
 
 ## Final build decision
 
-A polished Electron desktop app with full local QVAC intelligence (OCR + Voice + RAG + LLM + TTS), Solana devnet integration, guarded escrow, History & Recipients pages, backed by a clean repo, setup instructions, and a strong demo video.
+A polished Electron desktop app with local QVAC intelligence (OCR + RAG + LLM), Solana devnet integration, guarded escrow, History & Recipients pages, backed by a clean repo, setup instructions, and a strong demo video.

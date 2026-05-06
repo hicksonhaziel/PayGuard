@@ -1,31 +1,33 @@
+import type { PaymentDecision } from "../App";
+
 interface SuccessPageProps {
+  decision: PaymentDecision | null;
   onNewPayment: () => void;
 }
 
-const receiptDetails = [
-  {
-    label: "Security Verdict",
-    value: "Safe",
-    meta: ["Known recipient match", "Verified invoice hash"]
-  },
-  {
-    label: "Timestamp",
-    value: "Oct 24, 2024 - 14:32:10 UTC"
-  },
-  {
-    label: "Payment Mode",
-    value: "Guarded Payment",
-    tag: "Escrow"
-  },
-  {
-    label: "Document Hash",
-    value:
-      "SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    mono: true
-  }
-] as const;
+export function SuccessPage({ decision, onNewPayment }: SuccessPageProps) {
+  const displayDecision = decision ?? createFallbackDecision();
+  const receiptDetails = [
+    {
+      label: "Security Verdict",
+      value: displayDecision.verdict.verdict,
+      meta: displayDecision.verdict.reasons.slice(0, 2)
+    },
+    {
+      label: "Timestamp",
+      value: new Date().toLocaleString()
+    },
+    {
+      label: "Payment Mode",
+      value: displayDecision.selectedRoute,
+      tag: displayDecision.selectedRoute === "Guarded Payment" ? "Escrow" : "Direct"
+    },
+    {
+      label: "Risk Score",
+      value: `${displayDecision.verdict.riskScore}/100`
+    }
+  ] as const;
 
-export function SuccessPage({ onNewPayment }: SuccessPageProps) {
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] px-6 py-5 dark:bg-[#0f172a]">
       <div className="absolute left-0 top-0 h-1.5 w-full bg-gradient-to-r from-[#1a202c] via-[#6cf8bb] to-[#1a202c]" />
@@ -62,17 +64,17 @@ export function SuccessPage({ onNewPayment }: SuccessPageProps) {
               Amount Sent
             </span>
             <div className="flex items-baseline gap-2 font-['Manrope'] text-[28px] font-bold leading-tight text-[#181c1e] dark:text-white">
-              2,450.00
+              {displayDecision.amount}
               <span className="text-lg font-medium text-[#45474c] dark:text-slate-400">
-                USDT
+                {displayDecision.token}
               </span>
             </div>
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               <span className="text-[#45474c] dark:text-slate-400">To:</span>
               <span className="flex items-center gap-2 rounded-full bg-[#ebeef0] px-3 py-1.5 text-[#181c1e] dark:bg-white/10 dark:text-white">
-                <strong>Alpha Cloud Services</strong>
+                <strong>{displayDecision.recipientName}</strong>
                 <span className="text-[#45474c] dark:text-slate-400">
-                  (0x71C...3921)
+                  ({formatWallet(displayDecision.walletAddress)})
                 </span>
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#006c49] text-white">
                   <span className="material-symbols-outlined text-[12px] [font-variation-settings:'FILL'_1,'wght'_400,'GRAD'_0,'opsz'_24]">
@@ -91,15 +93,6 @@ export function SuccessPage({ onNewPayment }: SuccessPageProps) {
         </article>
 
         <section className="mt-1 flex w-full flex-wrap items-center justify-center gap-2.5">
-          <button
-            className="flex items-center justify-center gap-2 rounded-xl border-2 border-[#1a202c] bg-transparent px-4 py-2 text-sm font-semibold text-[#1a202c] transition-colors hover:bg-[#ebeef0] dark:border-white dark:text-white dark:hover:bg-white/10"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              volume_up
-            </span>
-            Listen to Receipt Summary
-          </button>
           <button
             className="flex items-center justify-center gap-2 rounded-xl bg-[#006c49] px-5 py-2 text-sm font-semibold text-white shadow-md transition-colors hover:bg-[#005236] dark:bg-[#6ffbbe] dark:text-[#002113] dark:hover:bg-[#4edea3]"
             onClick={onNewPayment}
@@ -180,4 +173,30 @@ function ReceiptDetail({ label, meta, mono, tag, value }: ReceiptDetailProps) {
       )}
     </div>
   );
+}
+
+function createFallbackDecision(): PaymentDecision {
+  return {
+    amount: "0.00",
+    token: "USDC",
+    walletAddress: "Unknown wallet",
+    recipientName: "Unknown recipient",
+    memo: "",
+    selectedRoute: "Guarded Payment",
+    verdict: {
+      verdict: "Review",
+      riskScore: 50,
+      recommendedRoute: "Guarded Payment",
+      reasons: ["No local QVAC verdict is available for this payment."],
+      summary: "Run local analysis before signing this payment."
+    }
+  };
+}
+
+function formatWallet(wallet: string) {
+  if (wallet.length <= 14) {
+    return wallet;
+  }
+
+  return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
 }

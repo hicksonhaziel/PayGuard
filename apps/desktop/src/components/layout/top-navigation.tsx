@@ -16,7 +16,10 @@ interface TopNavigationProps {
   onNavigate: (screen: AppScreen) => void;
 }
 
-export function TopNavigation({ activeScreen, onNavigate }: TopNavigationProps) {
+export function TopNavigation({
+  activeScreen,
+  onNavigate
+}: TopNavigationProps) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") {
       return "light";
@@ -49,7 +52,7 @@ export function TopNavigation({ activeScreen, onNavigate }: TopNavigationProps) 
         <div className="flex min-w-0 items-center gap-10">
           <img
             alt="PayGuard"
-            className="h-auto w-[132px] object-contain"
+            className="h-auto w-[150px] object-contain"
             src={banner}
           />
 
@@ -76,11 +79,6 @@ export function TopNavigation({ activeScreen, onNavigate }: TopNavigationProps) 
         </div>
 
         <div className="flex items-center gap-3 max-md:gap-1.5">
-          <div className="flex items-center gap-2 rounded-full border border-[#c6c6cc]/50 bg-[#f1f4f6] px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.05em] text-[#45474c] dark:border-white/10 dark:bg-white/5 dark:text-slate-300 max-md:hidden" title="Connected wallet">
-            <span className="h-[7px] w-[7px] rounded-full bg-[#006c49] dark:bg-[#6ffbbe]" />
-            <span>0x71C...3921</span>
-          </div>
-
           <button
             className="pg-icon-button"
             onClick={toggleTheme}

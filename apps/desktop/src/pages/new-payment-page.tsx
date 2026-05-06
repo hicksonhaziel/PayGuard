@@ -1,14 +1,54 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import type { PaymentEntryMode } from "../App";
+import type {
+  PaymentRagInput,
+  QvacOcrResult,
+  RecipientRagResult,
+  RiskVerdict
+} from "@payguard/qvac-agent";
+import type { PaymentDecision } from "../App";
+
+type OcrStatus = "idle" | "running" | "complete" | "error";
+type RagStatus = "idle" | "running" | "complete" | "error";
+type RiskStatus = "idle" | "running" | "error";
+
+type UploadedDocument = {
+  name: string;
+  path: string;
+  previewUrl: string | null;
+  type: string;
+};
+
+type OcrState = {
+  status: OcrStatus;
+  result: QvacOcrResult | null;
+  error: string | null;
+};
+
+type RagState = {
+  status: RagStatus;
+  result: RecipientRagResult | null;
+  error: string | null;
+};
+
+type PaymentDraft = {
+  selectedRecipientWallet: string;
+  walletAddress: string;
+  amount: string;
+  token: string;
+  memo: string;
+};
 
 interface NewPaymentPageProps {
-  entryMode: PaymentEntryMode;
-  onAnalyze: () => void;
+  onAnalyze: (decision: PaymentDecision) => void;
   onBack: () => void;
 }
 
 const pastRecipients = [
+  {
+    label: "Acme Store",
+    wallet: "7xK9mPZrLs8Qa4NdTz6Vu1JcBf3We9HyRkSMn2PaQ4pL"
+  },
   {
     label: "Alpha Solutions",
     wallet: "0xA17...82F9"
@@ -24,21 +64,148 @@ const pastRecipients = [
 ] as const;
 
 export function NewPaymentPage({
-  entryMode,
   onAnalyze,
   onBack
 }: NewPaymentPageProps) {
-  const showVoiceCard = entryMode === "voice";
-  const [uploadedDocument, setUploadedDocument] = useState<{
-    name: string;
-    previewUrl: string | null;
-    type: string;
-  } | null>(null);
+  const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
+  const [paymentDraft, setPaymentDraft] = useState<PaymentDraft>({
+    selectedRecipientWallet: "",
+    walletAddress: "",
+    amount: "",
+    token: "USDC",
+    memo: ""
+  });
+  const [ocrState, setOcrState] = useState<OcrState>({
+    status: "idle",
+    result: null,
+    error: null
+  });
+  const [ragState, setRagState] = useState<RagState>({
+    status: "idle",
+    result: null,
+    error: null
+  });
+  const [riskState, setRiskState] = useState<{
+    status: RiskStatus;
+    error: string | null;
+  }>({
+    status: "idle",
+    error: null
+  });
 
-  function handleDocumentFile(file: File | null) {
+  function buildPaymentRagInput(): PaymentRagInput {
+    return {
+      ocrText: ocrState.result?.text,
+      recipientWallet:
+        paymentDraft.walletAddress ||
+        ocrState.result?.hints.possibleWallets[0] ||
+        ocrState.result?.hints.addressLikeValues[0],
+      amount: paymentDraft.amount || ocrState.result?.hints.amounts[0],
+      token: paymentDraft.token,
+      memo: paymentDraft.memo
+    };
+  }
+
+  async function runRecipientMatch(ocrResult: QvacOcrResult, draft: PaymentDraft) {
+    if (!window.payguardDesktop?.matchRecipientWithRag) {
+      setRagState({
+        status: "error",
+        result: null,
+        error: "Desktop QVAC RAG bridge is not available."
+      });
+      return;
+    }
+
+    setRagState({
+      status: "running",
+      result: null,
+      error: null
+    });
+
+    const ragInput: PaymentRagInput = {
+      ocrText: ocrResult.text,
+      recipientWallet:
+        draft.walletAddress ||
+        ocrResult.hints.possibleWallets[0] ||
+        ocrResult.hints.addressLikeValues[0],
+      amount: draft.amount || ocrResult.hints.amounts[0],
+      token: draft.token,
+      memo: draft.memo
+    };
+
+    try {
+      const result = await window.payguardDesktop.matchRecipientWithRag(ragInput);
+      setRagState({
+        status: "complete",
+        result,
+        error: null
+      });
+    } catch (error) {
+      setRagState({
+        status: "error",
+        result: null,
+        error: error instanceof Error ? error.message : "QVAC RAG matching failed."
+      });
+    }
+  }
+
+  async function handleAnalyzePayment() {
+    if (!window.payguardDesktop?.analyzePaymentRisk) {
+      setRiskState({
+        status: "error",
+        error: "Desktop QVAC LLM bridge is not available."
+      });
+      return;
+    }
+
+    setRiskState({
+      status: "running",
+      error: null
+    });
+
+    try {
+      const verdict = await window.payguardDesktop.analyzePaymentRisk({
+        payment: buildPaymentRagInput(),
+        ocrText: ocrState.result?.text,
+        recipientMatch: ragState.result
+      });
+
+      setRiskState({
+        status: "idle",
+        error: null
+      });
+      onAnalyze(buildPaymentDecision(verdict));
+    } catch (error) {
+      setRiskState({
+        status: "error",
+        error: error instanceof Error ? error.message : "QVAC LLM analysis failed."
+      });
+    }
+  }
+
+  function buildPaymentDecision(verdict: RiskVerdict): PaymentDecision {
+    const ragInput = buildPaymentRagInput();
+
+    return {
+      amount: ragInput.amount || "0.00",
+      token: ragInput.token || "USDC",
+      walletAddress: ragInput.recipientWallet || "Unknown wallet",
+      recipientName:
+        ragState.result?.bestMatch?.recipientName ||
+        inferRecipientNameFromOcr(ocrState.result?.text) ||
+        "Unknown recipient",
+      memo: ragInput.memo || "",
+      selectedRoute: verdict.recommendedRoute,
+      verdict
+    };
+  }
+
+  async function handleDocumentFile(file: File | null) {
     if (!file) {
       return;
     }
+
+    const filePath = window.payguardDesktop?.getPathForFile(file) ?? "";
 
     setUploadedDocument((currentDocument) => {
       if (currentDocument?.previewUrl) {
@@ -47,12 +214,73 @@ export function NewPaymentPage({
 
       return {
         name: file.name,
+        path: filePath,
         previewUrl: file.type.startsWith("image/")
           ? URL.createObjectURL(file)
           : null,
         type: file.type || "Unknown file"
       };
     });
+
+    setOcrState({
+      status: "idle",
+      result: null,
+      error: null
+    });
+    setRagState({
+      status: "idle",
+      result: null,
+      error: null
+    });
+
+    if (!file.type.startsWith("image/")) {
+      setOcrState({
+        status: "error",
+        result: null,
+        error: "QVAC OCR is wired for PNG and JPG images in this MVP pass."
+      });
+      return;
+    }
+
+    if (!filePath) {
+      setOcrState({
+        status: "error",
+        result: null,
+        error: "Could not read the local file path from Electron."
+      });
+      return;
+    }
+
+    if (!window.payguardDesktop?.analyzeDocumentWithOcr) {
+      setOcrState({
+        status: "error",
+        result: null,
+        error: "Desktop QVAC bridge is not available."
+      });
+      return;
+    }
+
+    setOcrState({
+      status: "running",
+      result: null,
+      error: null
+    });
+
+    try {
+      const result = await window.payguardDesktop.analyzeDocumentWithOcr(filePath);
+      setOcrState({
+        status: "complete",
+        result,
+        error: null
+      });
+      await runRecipientMatch(result, paymentDraft);
+    } catch (error) {
+      setOcrState({
+        status: "error",
+        result: null,
+        error: error instanceof Error ? error.message : "QVAC OCR failed."
+      });
+    }
   }
 
   useEffect(() => {
@@ -84,14 +312,21 @@ export function NewPaymentPage({
 
         <div className="grid grid-cols-12 gap-5 max-lg:grid-cols-1">
           <div className="col-span-7 flex flex-col gap-3 max-lg:col-span-1">
-            {showVoiceCard ? <VoicePaymentCard /> : null}
-            <ManualEntryCard />
+            <ManualEntryCard draft={paymentDraft} onDraftChange={setPaymentDraft} />
           </div>
 
           <aside className="col-span-5 flex min-h-full flex-col gap-3 max-lg:col-span-1">
             <UploadCard onFileSelected={handleDocumentFile} />
-            <DocumentPreviewCard document={uploadedDocument} />
-            <AnalyzePanel onAnalyze={onAnalyze} />
+            <DocumentPreviewCard
+              document={uploadedDocument}
+              ocrState={ocrState}
+              ragState={ragState}
+            />
+            <AnalyzePanel
+              isAnalyzing={riskState.status === "running"}
+              error={riskState.error}
+              onAnalyze={handleAnalyzePayment}
+            />
           </aside>
         </div>
       </div>
@@ -99,59 +334,46 @@ export function NewPaymentPage({
   );
 }
 
-function VoicePaymentCard() {
-  return (
-    <section className="relative overflow-hidden rounded-2xl border border-[#e5e9eb] bg-white p-5 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
-      <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-[#6cf8bb] to-[#006c49]" />
-      <h2 className="mb-4 flex items-center gap-2 font-['Manrope'] text-lg font-bold text-[#030813] dark:text-white">
-        <span className="material-symbols-outlined text-[#006c49] dark:text-[#6ffbbe]">
-          mic
-        </span>
-        Speak Payment Request
-      </h2>
+function inferRecipientNameFromOcr(text?: string) {
+  if (!text) {
+    return null;
+  }
 
-      <div className="flex flex-col items-center justify-center py-3">
-        <button
-          className="group relative mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#1a202c] text-white shadow-lg transition-transform hover:scale-105 dark:bg-[#6ffbbe] dark:text-[#002113]"
-          type="button"
-          aria-label="Record payment request"
-        >
-          <span className="material-symbols-outlined text-3xl">mic</span>
-          <span className="absolute inset-0 rounded-full border-2 border-[#6cf8bb] opacity-0 group-hover:animate-ping" />
-        </button>
-        <p className="max-w-md text-center text-sm leading-6 text-[#45474c] dark:text-slate-400">
-          "Send 500 USDT to Alpha Solutions for Q3 Server Maintenance."
-        </p>
+  const merchantMatch = text.match(/Merchant Name\s*\n?(.+)/i);
+  const walletIndex = text.toLowerCase().indexOf("wallet address");
 
-        <div className="mt-6 flex h-8 items-center justify-center gap-1 opacity-60">
-          {[8, 16, 24, 12, 32, 20, 8].map((height, index) => (
-            <span
-              className="w-1 rounded-full bg-[#006c49] dark:bg-[#6ffbbe]"
-              key={`${height}-${index}`}
-              style={{ height }}
-            />
-          ))}
-        </div>
-      </div>
-    </section>
-  );
+  if (merchantMatch?.[1]) {
+    return merchantMatch[1].trim();
+  }
+
+  if (walletIndex > 0) {
+    return text.slice(0, walletIndex).split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? null;
+  }
+
+  return null;
 }
 
-function ManualEntryCard() {
-  const [selectedRecipientWallet, setSelectedRecipientWallet] = useState("");
-  const [walletAddress, setWalletAddress] = useState("");
+interface ManualEntryCardProps {
+  draft: PaymentDraft;
+  onDraftChange: (draft: PaymentDraft) => void;
+}
 
+function ManualEntryCard({ draft, onDraftChange }: ManualEntryCardProps) {
   function selectPastRecipient(wallet: string) {
-    setSelectedRecipientWallet(wallet);
-    setWalletAddress(wallet);
+    onDraftChange({
+      ...draft,
+      selectedRecipientWallet: wallet,
+      walletAddress: wallet
+    });
   }
 
   function updateWalletAddress(value: string) {
-    setWalletAddress(value);
-
-    if (value !== selectedRecipientWallet) {
-      setSelectedRecipientWallet("");
-    }
+    onDraftChange({
+      ...draft,
+      selectedRecipientWallet:
+        value === draft.selectedRecipientWallet ? draft.selectedRecipientWallet : "",
+      walletAddress: value
+    });
   }
 
   return (
@@ -167,7 +389,7 @@ function ManualEntryCard() {
             <select
               className="pg-input appearance-none pr-10"
               onChange={(event) => selectPastRecipient(event.target.value)}
-              value={selectedRecipientWallet}
+              value={draft.selectedRecipientWallet}
             >
               <option value="">Choose a saved recipient</option>
               {pastRecipients.map((recipient) => (
@@ -196,7 +418,7 @@ function ManualEntryCard() {
               onChange={(event) => updateWalletAddress(event.target.value)}
               placeholder="0x..."
               type="text"
-              value={walletAddress}
+              value={draft.walletAddress}
             />
           </span>
         </label>
@@ -208,17 +430,30 @@ function ManualEntryCard() {
               <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 font-['Manrope'] text-[#76777c]">
                 $
               </span>
-              <input className="pg-input pl-[56px]" placeholder="0.00" type="number" />
+              <input
+                className="pg-input pl-[56px]"
+                onChange={(event) =>
+                  onDraftChange({ ...draft, amount: event.target.value })
+                }
+                placeholder="0.00"
+                type="number"
+                value={draft.amount}
+              />
             </span>
           </label>
 
           <label className="grid gap-2">
             <span className="pg-field-label">Token</span>
             <span className="relative">
-              <select className="pg-input appearance-none pr-10">
+              <select
+                className="pg-input appearance-none pr-10"
+                onChange={(event) =>
+                  onDraftChange({ ...draft, token: event.target.value })
+                }
+                value={draft.token}
+              >
                 <option value="USDT">USDT</option>
                 <option value="USDC">USDC</option>
-                <option value="DAI">DAI</option>
               </select>
               <span className="material-symbols-outlined pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#76777c]">
                 expand_more
@@ -231,7 +466,9 @@ function ManualEntryCard() {
           <span className="pg-field-label">Memo / Reason</span>
           <textarea
             className="pg-input min-h-[92px] resize-none p-4"
+            onChange={(event) => onDraftChange({ ...draft, memo: event.target.value })}
             placeholder="Enter transaction details..."
+            value={draft.memo}
           />
         </label>
       </form>
@@ -286,14 +523,14 @@ function UploadCard({ onFileSelected }: UploadCardProps) {
 }
 
 interface DocumentPreviewCardProps {
-  document: {
-    name: string;
-    previewUrl: string | null;
-    type: string;
-  } | null;
+  document: UploadedDocument | null;
+  ocrState: OcrState;
+  ragState: RagState;
 }
 
-function DocumentPreviewCard({ document }: DocumentPreviewCardProps) {
+function DocumentPreviewCard({ document, ocrState, ragState }: DocumentPreviewCardProps) {
+  const hasOcrText = Boolean(ocrState.result?.text.trim());
+
   return (
     <section className="flex min-h-[360px] flex-1 flex-col rounded-2xl border border-[#e5e9eb] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
       <div className="mb-3 flex items-center justify-between gap-4">
@@ -306,12 +543,12 @@ function DocumentPreviewCard({ document }: DocumentPreviewCardProps) {
         </span>
       </div>
 
-      <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-xl border border-[#e5e9eb] bg-[#f1f4f6] p-4 dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="relative flex min-h-[300px] flex-1 flex-col items-center justify-center overflow-hidden rounded-xl border border-[#e5e9eb] bg-[#f1f4f6] p-4 dark:border-white/10 dark:bg-white/[0.04]">
         {document?.previewUrl ? (
           <>
             <img
               alt={document.name}
-              className="max-h-[320px] w-full rounded-lg object-contain"
+              className="max-h-[260px] w-full rounded-lg object-contain"
               src={document.previewUrl}
             />
             <div className="absolute bottom-3 left-3 right-3 rounded-lg border border-white/70 bg-white/85 px-3 py-2 text-xs text-[#45474c] shadow-sm backdrop-blur dark:border-white/10 dark:bg-[#0f172a]/85 dark:text-slate-300">
@@ -352,27 +589,281 @@ function DocumentPreviewCard({ document }: DocumentPreviewCardProps) {
           </>
         )}
       </div>
+
+      {document ? (
+        <div className="mt-3 rounded-xl border border-[#e5e9eb] bg-[#f7fafc] p-3 dark:border-white/10 dark:bg-white/[0.04]">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="font-['Manrope'] text-sm font-bold text-[#030813] dark:text-white">
+              QVAC OCR
+            </h3>
+            <OcrStatusBadge status={ocrState.status} />
+          </div>
+
+          {ocrState.status === "running" ? (
+            <p className="flex items-center gap-2 text-xs leading-5 text-[#45474c] dark:text-slate-400">
+              <span className="material-symbols-outlined pg-spinner text-sm text-[#006c49] dark:text-[#6ffbbe]">
+                progress_activity
+              </span>
+              Reading the document locally with QVAC.
+            </p>
+          ) : ocrState.status === "error" ? (
+            <p className="text-xs leading-5 text-[#9f1239] dark:text-rose-300">
+              {ocrState.error}
+            </p>
+          ) : hasOcrText ? (
+            <div className="grid gap-3">
+              <HintGroup label="Amounts" values={ocrState.result?.hints.amounts ?? []} />
+              <HintGroup label="References" values={ocrState.result?.hints.invoiceIds ?? []} />
+              <HintGroup
+                label="Wallet-like"
+                values={[
+                  ...(ocrState.result?.hints.possibleWallets ?? []),
+                  ...(ocrState.result?.hints.addressLikeValues ?? [])
+                ]}
+              />
+              <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap rounded-lg border border-[#e5e9eb] bg-white p-3 text-xs leading-5 text-[#45474c] dark:border-white/10 dark:bg-[#0f172a] dark:text-slate-300">
+                {ocrState.result?.text}
+              </pre>
+            </div>
+          ) : (
+            <p className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
+              OCR results will appear here after an image upload.
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {document ? (
+        <div className="mt-3 rounded-xl border border-[#e5e9eb] bg-[#f7fafc] p-3 dark:border-white/10 dark:bg-white/[0.04]">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="font-['Manrope'] text-sm font-bold text-[#030813] dark:text-white">
+              Trusted Recipient RAG
+            </h3>
+            <RagStatusBadge status={ragState.status} />
+          </div>
+
+          {ragState.status === "running" ? (
+            <p className="flex items-center gap-2 text-xs leading-5 text-[#45474c] dark:text-slate-400">
+              <span className="material-symbols-outlined pg-spinner text-sm text-[#006c49] dark:text-[#6ffbbe]">
+                progress_activity
+              </span>
+              Comparing payment context against local trusted history.
+            </p>
+          ) : ragState.status === "error" ? (
+            <p className="text-xs leading-5 text-[#9f1239] dark:text-rose-300">
+              {ragState.error}
+            </p>
+          ) : ragState.result ? (
+            <RecipientMatchSummary result={ragState.result} />
+          ) : (
+            <p className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
+              Recipient matching runs after OCR completes.
+            </p>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
 
+function OcrStatusBadge({ status }: { status: OcrStatus }) {
+  const statusConfig = {
+    idle: {
+      icon: "pending",
+      label: "Waiting",
+      className: "bg-[#f1f4f6] text-[#45474c] dark:bg-white/10 dark:text-slate-300"
+    },
+    running: {
+      icon: "progress_activity",
+      label: "Running",
+      className: "bg-[#e6fff3] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+    },
+    complete: {
+      icon: "check_circle",
+      label: "Complete",
+      className: "bg-[#e6fff3] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+    },
+    error: {
+      icon: "error",
+      label: "Needs image",
+      className: "bg-rose-50 text-[#9f1239] dark:bg-rose-500/10 dark:text-rose-300"
+    }
+  } satisfies Record<OcrStatus, { icon: string; label: string; className: string }>;
+
+  const config = statusConfig[status];
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${config.className}`}
+    >
+      <span className={`material-symbols-outlined text-sm ${status === "running" ? "pg-spinner" : ""}`}>
+        {config.icon}
+      </span>
+      {config.label}
+    </span>
+  );
+}
+
+function RagStatusBadge({ status }: { status: RagStatus }) {
+  const statusConfig = {
+    idle: {
+      icon: "pending",
+      label: "Waiting",
+      className: "bg-[#f1f4f6] text-[#45474c] dark:bg-white/10 dark:text-slate-300"
+    },
+    running: {
+      icon: "progress_activity",
+      label: "Matching",
+      className: "bg-[#e6fff3] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+    },
+    complete: {
+      icon: "manage_search",
+      label: "Matched",
+      className: "bg-[#e6fff3] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+    },
+    error: {
+      icon: "error",
+      label: "Review",
+      className: "bg-rose-50 text-[#9f1239] dark:bg-rose-500/10 dark:text-rose-300"
+    }
+  } satisfies Record<RagStatus, { icon: string; label: string; className: string }>;
+
+  const config = statusConfig[status];
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${config.className}`}
+    >
+      <span className={`material-symbols-outlined text-sm ${status === "running" ? "pg-spinner" : ""}`}>
+        {config.icon}
+      </span>
+      {config.label}
+    </span>
+  );
+}
+
+function RecipientMatchSummary({ result }: { result: RecipientRagResult }) {
+  const recommendationConfig = {
+    "trusted-match": {
+      label: "Trusted match",
+      className: "bg-[#e6fff3] text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+    },
+    review: {
+      label: "Needs review",
+      className: "bg-amber-50 text-amber-800 dark:bg-amber-400/10 dark:text-amber-200"
+    },
+    "no-match": {
+      label: "No strong match",
+      className: "bg-rose-50 text-[#9f1239] dark:bg-rose-500/10 dark:text-rose-300"
+    }
+  } satisfies Record<RecipientRagResult["recommendation"], { label: string; className: string }>;
+  const recommendation = recommendationConfig[result.recommendation];
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${recommendation.className}`}>
+          {recommendation.label}
+        </span>
+        {result.bestMatch ? (
+          <span className="text-xs font-semibold text-[#030813] dark:text-white">
+            {result.bestMatch.recipientName ?? "Unknown recipient"} · score{" "}
+            {result.bestMatch.score.toFixed(3)}
+          </span>
+        ) : null}
+      </div>
+
+      <ul className="m-0 grid gap-1 p-0">
+        {result.reasons.map((reason) => (
+          <li
+            className="flex gap-2 text-xs leading-5 text-[#45474c] dark:text-slate-400"
+            key={reason}
+          >
+            <span className="material-symbols-outlined mt-0.5 text-sm text-[#006c49] dark:text-[#6ffbbe]">
+              verified
+            </span>
+            <span>{reason}</span>
+          </li>
+        ))}
+      </ul>
+
+      {result.matches.length > 1 ? (
+        <div>
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#76777c] dark:text-slate-500">
+            Other matches
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {result.matches.slice(1).map((match) => (
+              <span
+                className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-[#030813] dark:bg-[#0f172a] dark:text-white"
+                key={`${match.recipientName}-${match.score}`}
+              >
+                {match.recipientName ?? "Unknown"} {match.score.toFixed(3)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HintGroup({ label, values }: { label: string; values: string[] }) {
+  const uniqueValues = [...new Set(values)].slice(0, 3);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-[#76777c] dark:text-slate-500">
+        {label}
+      </p>
+      {uniqueValues.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {uniqueValues.map((value) => (
+            <span
+              className="max-w-full truncate rounded-md bg-white px-2 py-1 text-xs font-semibold text-[#030813] dark:bg-[#0f172a] dark:text-white"
+              key={`${label}-${value}`}
+              title={value}
+            >
+              {value}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-[#45474c] dark:text-slate-400">None detected</p>
+      )}
+    </div>
+  );
+}
+
 interface AnalyzePanelProps {
+  error: string | null;
+  isAnalyzing: boolean;
   onAnalyze: () => void;
 }
 
-function AnalyzePanel({ onAnalyze }: AnalyzePanelProps) {
+function AnalyzePanel({ error, isAnalyzing, onAnalyze }: AnalyzePanelProps) {
   return (
     <div className="mt-auto flex flex-col gap-2 pt-1">
       <button
-        className="group flex w-full items-center justify-center gap-3 rounded-xl bg-[#1a202c] px-6 py-3 font-['Manrope'] text-base font-bold text-white shadow-lg shadow-[#1a202c]/20 transition-colors hover:bg-[#030813] dark:bg-[#6ffbbe] dark:text-[#002113] dark:shadow-[#6ffbbe]/10 dark:hover:bg-[#4edea3]"
+        className="group flex w-full items-center justify-center gap-3 rounded-xl bg-[#1a202c] px-6 py-3 font-['Manrope'] text-base font-bold text-white shadow-lg shadow-[#1a202c]/20 transition-colors hover:bg-[#030813] disabled:cursor-not-allowed disabled:opacity-70 dark:bg-[#6ffbbe] dark:text-[#002113] dark:shadow-[#6ffbbe]/10 dark:hover:bg-[#4edea3]"
+        disabled={isAnalyzing}
         onClick={onAnalyze}
         type="button"
       >
-        <span className="material-symbols-outlined transition-transform group-hover:rotate-12">
-          analytics
+        <span
+          className={`material-symbols-outlined ${
+            isAnalyzing ? "pg-spinner" : "transition-transform group-hover:rotate-12"
+          }`}
+        >
+          {isAnalyzing ? "progress_activity" : "analytics"}
         </span>
-        Analyze with QVAC
+        {isAnalyzing ? "Running Local LLM" : "Analyze with QVAC"}
       </button>
+      {error ? (
+        <p className="text-center text-xs leading-5 text-[#9f1239] dark:text-rose-300">
+          {error}
+        </p>
+      ) : null}
       <p className="flex items-center justify-center gap-2 text-center text-xs text-[#45474c] dark:text-slate-400">
         <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">
           lock
