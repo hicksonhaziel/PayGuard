@@ -65,7 +65,7 @@ export function SuccessPage({
       source: "payguard",
       summary: decision.verdict.summary,
       token: decision.token,
-      txSignature: `demo-${crypto.randomUUID()}`,
+      txSignature: decision.txSignature ?? `demo-${crypto.randomUUID()}`,
       verdict: decision.verdict.verdict
     });
   }, [decision, network, wallet?.address]);
@@ -92,7 +92,7 @@ export function SuccessPage({
                 className="font-semibold text-[#006c49] hover:underline dark:text-[#6ffbbe]"
                 type="button"
               >
-                0x82f...a1b2
+                {formatSignature(displayDecision.txSignature ?? "pending")}
               </button>
             </p>
           </div>
@@ -226,6 +226,7 @@ function createFallbackDecision(): PaymentDecision {
     memo: "",
     guardedHoldHours: 24,
     selectedRoute: "Guarded Payment",
+    txSignature: undefined,
     verdict: {
       verdict: "Review",
       riskScore: 50,
@@ -242,4 +243,12 @@ function formatWallet(wallet: string) {
   }
 
   return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
+}
+
+function formatSignature(signature: string) {
+  if (signature.length <= 14) {
+    return signature;
+  }
+
+  return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
 }

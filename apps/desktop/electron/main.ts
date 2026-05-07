@@ -2,6 +2,13 @@ import path from "node:path";
 import http from "node:http";
 import { existsSync } from "node:fs";
 import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
+import { readFileSync } from "node:fs";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedInstruction,
+  getAssociatedTokenAddressSync
+} from "@solana/spl-token";
 import {
   analyzeDocumentWithOcr,
   analyzePaymentRiskWithLlm,
@@ -23,6 +30,13 @@ const devServerUrl = "http://127.0.0.1:5174";
 const appIconPath = path.join(__dirname, "../assets/icon.png");
 const supportedOcrExtensions = new Set([".png", ".jpg", ".jpeg"]);
 type SolanaNetwork = "mainnet-beta" | "devnet";
+type DirectSendInput = {
+  amount: string;
+  network: SolanaNetwork;
+  recipientWallet: string;
+  senderWallet: string;
+  token: "USDC" | "USDT";
+};
 
 const solanaRpcUrls: Record<SolanaNetwork, string> = {
   devnet: process.env.PAYGUARD_SOLANA_DEVNET_RPC_URL ?? "https://api.devnet.solana.com",
@@ -51,6 +65,10 @@ let walletBridgeServer: http.Server | null = null;
 let walletBridgeTimeout: NodeJS.Timeout | null = null;
 let mainWindow: BrowserWindow | null = null;
 const balanceCache = new Map<string, CachedWalletBalances>();
+const solanaWeb3BrowserBundle = readFileSync(
+  path.join(__dirname, "../../../node_modules/@solana/web3.js/lib/index.iife.min.js"),
+  "utf8"
+);
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 
@@ -166,6 +184,20 @@ function registerWalletHandlers() {
     }
 
     return getWalletBalances(walletAddress.trim(), network);
+  });
+
+  ipcMain.handle("wallet:direct-send", async (event, input: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window) {
+      throw new Error("Could not find the PayGuard window for direct payment signing.");
+    }
+
+    if (!isDirectSendInput(input)) {
+      throw new Error("Valid direct payment details are required.");
+    }
+
+    return startExternalDirectSendBridge(window, input);
   });
 }
 
@@ -421,6 +453,25 @@ function isPaymentRagInput(input: unknown): input is PaymentRagInput {
   });
 }
 
+function isDirectSendInput(input: unknown): input is DirectSendInput {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+
+  return (
+    typeof candidate.amount === "string" &&
+    Number(candidate.amount) > 0 &&
+    (candidate.network === "mainnet-beta" || candidate.network === "devnet") &&
+    typeof candidate.recipientWallet === "string" &&
+    candidate.recipientWallet.trim().length > 0 &&
+    typeof candidate.senderWallet === "string" &&
+    candidate.senderWallet.trim().length > 0 &&
+    (candidate.token === "USDC" || candidate.token === "USDT")
+  );
+}
+
 function isPaymentRagRequest(input: unknown): input is PaymentRagRequest {
   if (!isPaymentRagInput(input)) {
     return false;
@@ -623,6 +674,156 @@ async function closeWalletBridge() {
   });
 }
 
+async function startExternalDirectSendBridge(
+  window: BrowserWindow,
+  input: DirectSendInput
+) {
+  await closeWalletBridge();
+
+  const transaction = await buildDirectSendTransaction(input);
+  const nonce = crypto.randomUUID();
+  const bridgeResult = new Promise<{ signature: string }>((resolve, reject) => {
+    walletBridgeServer = http.createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+
+      if (request.method === "GET" && url.pathname === "/solana-web3.js") {
+        response.writeHead(200, {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(solanaWeb3BrowserBundle);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/sign") {
+        response.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(renderDirectSendPage(nonce, input, transaction));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/signed") {
+        const chunks: Buffer[] = [];
+
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          try {
+            const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+              nonce?: unknown;
+              signature?: unknown;
+            };
+
+            if (payload.nonce !== nonce || typeof payload.signature !== "string") {
+              response.writeHead(400, { "Content-Type": "application/json" });
+              response.end(JSON.stringify({ ok: false }));
+              return;
+            }
+
+            response.writeHead(200, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: true }));
+            resolve({ signature: payload.signature });
+            void closeWalletBridge();
+          } catch (error) {
+            response.writeHead(400, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: false }));
+            reject(error);
+            void closeWalletBridge();
+          }
+        });
+        return;
+      }
+
+      response.writeHead(404, { "Content-Type": "text/plain" });
+      response.end("Not found");
+    });
+
+    walletBridgeServer.once("error", reject);
+    walletBridgeServer.listen(0, "127.0.0.1", () => {
+      const address = walletBridgeServer?.address();
+
+      if (!address || typeof address === "string") {
+        reject(new Error("Could not allocate a local signing bridge port."));
+        return;
+      }
+
+      walletBridgeTimeout = setTimeout(() => {
+        reject(new Error("Wallet signing timed out."));
+        void closeWalletBridge();
+      }, 180000);
+
+      void shell.openExternal(`http://127.0.0.1:${address.port}/sign`);
+    });
+  });
+
+  return bridgeResult;
+}
+
+async function buildDirectSendTransaction(input: DirectSendInput) {
+  const mintAddress = stablecoinMints[input.network][input.token];
+
+  if (!mintAddress) {
+    throw new Error(`${input.token} is not configured on ${input.network}.`);
+  }
+
+  const sender = new PublicKey(input.senderWallet);
+  const recipient = new PublicKey(input.recipientWallet);
+  const mint = new PublicKey(mintAddress);
+  const decimals = 6;
+  const sourceAta = getAssociatedTokenAddressSync(mint, sender);
+  const destinationAta = getAssociatedTokenAddressSync(mint, recipient);
+  const connection = new Connection(solanaRpcUrls[input.network], "confirmed");
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const transaction = new Transaction({
+    blockhash,
+    feePayer: sender,
+    lastValidBlockHeight
+  });
+
+  transaction.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      sender,
+      destinationAta,
+      recipient,
+      mint
+    ),
+    createTransferCheckedInstruction(
+      sourceAta,
+      mint,
+      destinationAta,
+      sender,
+      decimalAmountToBaseUnits(input.amount, decimals),
+      decimals
+    )
+  );
+
+  return {
+    base64: transaction
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString("base64"),
+    mintAddress,
+    rpcUrl: solanaRpcUrls[input.network]
+  };
+}
+
+function decimalAmountToBaseUnits(amount: string, decimals: number) {
+  const trimmedAmount = amount.trim();
+  const [wholePart, fractionalPart = ""] = trimmedAmount.split(".");
+
+  if (!/^\d+$/.test(wholePart) || !/^\d*$/.test(fractionalPart)) {
+    throw new Error("Enter a valid payment amount.");
+  }
+
+  const paddedFraction = fractionalPart.padEnd(decimals, "0").slice(0, decimals);
+
+  if (fractionalPart.length > decimals) {
+    throw new Error(`Amount supports at most ${decimals} decimal places.`);
+  }
+
+  return BigInt(wholePart) * 10n ** BigInt(decimals) + BigInt(paddedFraction || "0");
+}
+
 function renderWalletConnectPage(nonce: string) {
   return `<!doctype html>
 <html lang="en">
@@ -758,6 +959,223 @@ function renderWalletConnectPage(nonce: string) {
   </script>
 </body>
 </html>`;
+}
+
+function renderDirectSendPage(
+  nonce: string,
+  input: DirectSendInput,
+  transaction: { base64: string; mintAddress: string; rpcUrl: string }
+) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign PayGuard Payment</title>
+  <style>
+    body {
+      align-items: center;
+      background: #f7fafc;
+      color: #030813;
+      display: flex;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    main {
+      background: white;
+      border: 1px solid #e5e9eb;
+      border-radius: 18px;
+      box-shadow: 0 14px 45px rgba(15, 23, 42, 0.08);
+      max-width: 480px;
+      padding: 28px;
+      width: 100%;
+    }
+    h1 {
+      font-size: 24px;
+      line-height: 1.2;
+      margin: 0 0 10px;
+    }
+    p {
+      color: #45474c;
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0 0 18px;
+    }
+    dl {
+      background: #f1f4f6;
+      border-radius: 14px;
+      display: grid;
+      gap: 10px;
+      margin: 0 0 18px;
+      padding: 14px;
+    }
+    div.row {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+    dt {
+      color: #45474c;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    dd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      margin: 0;
+      max-width: 270px;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    button {
+      align-items: center;
+      background: #030813;
+      border: 0;
+      border-radius: 12px;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      font-size: 14px;
+      font-weight: 800;
+      justify-content: center;
+      min-height: 44px;
+      padding: 12px 16px;
+      width: 100%;
+    }
+    button + button {
+      margin-top: 10px;
+    }
+    .secondary {
+      background: #f1f4f6;
+      color: #030813;
+    }
+    #status {
+      border-radius: 12px;
+      background: #f1f4f6;
+      color: #45474c;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 14px;
+      padding: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sign PayGuard Direct Payment</h1>
+    <p>Review this direct stablecoin transfer, then approve it in Solflare or Phantom. PayGuard never sees your private key.</p>
+    <dl>
+      <div class="row"><dt>Amount</dt><dd>${escapeHtml(input.amount)} ${escapeHtml(input.token)}</dd></div>
+      <div class="row"><dt>Network</dt><dd>${escapeHtml(input.network)}</dd></div>
+      <div class="row"><dt>From</dt><dd title="${escapeHtml(input.senderWallet)}">${escapeHtml(input.senderWallet)}</dd></div>
+      <div class="row"><dt>To</dt><dd title="${escapeHtml(input.recipientWallet)}">${escapeHtml(input.recipientWallet)}</dd></div>
+      <div class="row"><dt>Mint</dt><dd title="${escapeHtml(transaction.mintAddress)}">${escapeHtml(transaction.mintAddress)}</dd></div>
+    </dl>
+    <button id="solflare">Sign with Solflare</button>
+    <button id="phantom" class="secondary">Sign with Phantom</button>
+    <div id="status">Waiting for wallet selection.</div>
+  </main>
+  <script src="/solana-web3.js"></script>
+  <script>
+    const nonce = ${JSON.stringify(nonce)};
+    const expectedAddress = ${JSON.stringify(input.senderWallet)};
+    const rpcUrl = ${JSON.stringify(transaction.rpcUrl)};
+    const transactionBase64 = ${JSON.stringify(transaction.base64)};
+    const statusEl = document.getElementById("status");
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function getProvider(kind) {
+      if (kind === "solflare" && window.solflare) return window.solflare;
+      if (kind === "phantom" && window.phantom && window.phantom.solana) return window.phantom.solana;
+      if (window.solana) return window.solana;
+      return null;
+    }
+
+    function base64ToBytes(value) {
+      const binary = atob(value);
+      const bytes = new Uint8Array(binary.length);
+
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+
+      return bytes;
+    }
+
+    async function sign(kind) {
+      const provider = getProvider(kind);
+
+      if (!provider) {
+        setStatus(kind === "solflare" ? "Solflare is not available in this browser." : "Phantom is not available in this browser.");
+        return;
+      }
+
+      try {
+        setStatus("Opening wallet approval...");
+        const connectResponse = await provider.connect();
+        const publicKey = connectResponse && connectResponse.publicKey ? connectResponse.publicKey : provider.publicKey;
+        const address = typeof publicKey === "string" ? publicKey : publicKey && publicKey.toString();
+
+        if (address !== expectedAddress) {
+          throw new Error("Connected wallet does not match the PayGuard sender wallet.");
+        }
+
+        const transaction = solanaWeb3.Transaction.from(base64ToBytes(transactionBase64));
+        let signature;
+
+        if (provider.signAndSendTransaction) {
+          setStatus("Requesting wallet signature...");
+          const result = await provider.signAndSendTransaction(transaction);
+          signature = typeof result === "string" ? result : result && result.signature;
+        } else if (provider.signTransaction) {
+          setStatus("Requesting wallet signature...");
+          const signedTransaction = await provider.signTransaction(transaction);
+          setStatus("Sending signed transaction...");
+          const connection = new solanaWeb3.Connection(rpcUrl, "confirmed");
+          signature = await connection.sendRawTransaction(signedTransaction.serialize());
+        } else {
+          throw new Error("This wallet does not support transaction signing.");
+        }
+
+        if (!signature) {
+          throw new Error("Wallet did not return a transaction signature.");
+        }
+
+        setStatus("Returning signature to PayGuard...");
+        await fetch("/signed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nonce, signature })
+        });
+        setStatus("Payment submitted. You can return to PayGuard.");
+      } catch (error) {
+        setStatus(error && error.message ? error.message : "Payment signing failed.");
+      }
+    }
+
+    document.getElementById("solflare").addEventListener("click", () => sign("solflare"));
+    document.getElementById("phantom").addEventListener("click", () => sign("phantom"));
+  </script>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 app.whenReady().then(() => {

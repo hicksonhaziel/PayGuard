@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
   },
   getWalletBalances: (input: unknown) =>
     ipcRenderer.invoke("wallet:get-balances", input),
+  startDirectSend: (input: unknown) =>
+    ipcRenderer.invoke("wallet:direct-send", input),
   startExternalWalletConnect: () =>
     ipcRenderer.invoke("wallet:start-external-connect"),
   store: {

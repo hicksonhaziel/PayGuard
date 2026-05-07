@@ -256,6 +256,15 @@ export function NewPaymentPage({
   }, [prefilledRecipient, wallet?.address, network]);
 
   useEffect(() => {
+    if (network === "devnet" && paymentDraft.token === "USDT") {
+      updatePaymentDraft({
+        ...paymentDraft,
+        token: "USDC"
+      });
+    }
+  }, [network, paymentDraft]);
+
+  useEffect(() => {
     return () => {
       if (uploadedDocument?.previewUrl) {
         URL.revokeObjectURL(uploadedDocument.previewUrl);
@@ -288,6 +297,7 @@ export function NewPaymentPage({
               draft={paymentDraft}
               errors={hasAttemptedAnalyze ? validationErrors : {}}
               isLoadingRecipients={isLoadingRecipients}
+              network={network}
               wallet={wallet}
               onDraftChange={updatePaymentDraft}
               recipients={recipients}
@@ -480,6 +490,7 @@ interface ManualEntryCardProps {
   draft: PaymentDraft;
   errors: PaymentValidationErrors;
   isLoadingRecipients: boolean;
+  network: SolanaNetwork;
   wallet: ConnectedWallet | null;
   onDraftChange: (draft: PaymentDraft) => void;
   recipients: RecipientSummary[];
@@ -489,10 +500,13 @@ function ManualEntryCard({
   draft,
   errors,
   isLoadingRecipients,
+  network,
   wallet,
   onDraftChange,
   recipients
 }: ManualEntryCardProps) {
+  const isDevnet = network === "devnet";
+
   function selectPastRecipient(wallet: string) {
     onDraftChange({
       ...draft,
@@ -610,13 +624,20 @@ function ManualEntryCard({
                 }
                 value={draft.token}
               >
-                <option value="USDT">USDT</option>
                 <option value="USDC">USDC</option>
+                <option disabled={isDevnet} value="USDT">
+                  {isDevnet ? "USDT unavailable on devnet" : "USDT"}
+                </option>
               </select>
               <span className="material-symbols-outlined pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#76777c]">
                 expand_more
               </span>
             </span>
+            {isDevnet ? (
+              <span className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
+                Devnet uses USDC for test transfers.
+              </span>
+            ) : null}
           </label>
         </div>
 

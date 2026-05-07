@@ -41,6 +41,7 @@ export type PaymentDecision = {
   recipientName: string;
   memo: string;
   selectedRoute: "Direct Send" | "Guarded Payment" | "Block";
+  txSignature?: string;
   guardedHoldHours: number;
   verdict: RiskVerdict;
 };
@@ -73,6 +74,7 @@ export default function App() {
   const [paymentDecision, setPaymentDecision] =
     useState<PaymentDecision | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [paymentActionError, setPaymentActionError] = useState<string | null>(null);
   const [analysisHasDocument, setAnalysisHasDocument] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<AnalysisStepKey>("rag");
   const [prefilledRecipient, setPrefilledRecipient] =
@@ -132,6 +134,7 @@ export default function App() {
   function startNewPayment(recipient?: PrefilledRecipient) {
     setTransitionDirection("forward");
     setPaymentDecision(null);
+    setPaymentActionError(null);
     setPrefilledRecipient(recipient ?? null);
     setActiveScreen("new-payment");
   }
@@ -197,15 +200,38 @@ export default function App() {
     }
   }
 
-  function completeDirectSend() {
-    if (paymentDecision) {
-      setPaymentDecision({
-        ...paymentDecision,
-        selectedRoute: "Direct Send"
-      });
+  async function completeDirectSend() {
+    if (!paymentDecision || !connectedWallet) {
+      setPaymentActionError("Connect a wallet before signing this payment.");
+      return;
     }
 
-    navigateTo("success");
+    if (paymentDecision.token !== "USDC" && paymentDecision.token !== "USDT") {
+      setPaymentActionError("Only USDC and USDT direct payments are supported.");
+      return;
+    }
+
+    try {
+      setPaymentActionError(null);
+      const result = await window.payguardDesktop!.startDirectSend({
+        amount: paymentDecision.amount,
+        network: selectedNetwork,
+        recipientWallet: paymentDecision.walletAddress,
+        senderWallet: connectedWallet.address,
+        token: paymentDecision.token
+      });
+
+      setPaymentDecision({
+        ...paymentDecision,
+        selectedRoute: "Direct Send",
+        txSignature: result.signature
+      });
+      navigateTo("success");
+    } catch (error) {
+      setPaymentActionError(
+        error instanceof Error ? error.message : "Direct payment signing failed."
+      );
+    }
   }
 
   function chooseGuardedPayment(guardedHoldHours: number) {
@@ -213,7 +239,8 @@ export default function App() {
       setPaymentDecision({
         ...paymentDecision,
         guardedHoldHours,
-        selectedRoute: "Guarded Payment"
+        selectedRoute: "Guarded Payment",
+        txSignature: `demo-${crypto.randomUUID()}`
       });
     }
 
@@ -336,6 +363,7 @@ export default function App() {
           paymentDecision ? (
             <ConfirmPage
               decision={paymentDecision}
+              error={paymentActionError}
               onCancel={() => navigateTo("home")}
               onDirectSend={completeDirectSend}
               onGuardedPayment={chooseGuardedPayment}
@@ -452,6 +480,7 @@ function buildPaymentDecision(
     memo: request.payment.memo || "",
     guardedHoldHours: 24,
     selectedRoute: verdict.recommendedRoute,
+    txSignature: undefined,
     verdict
   };
 }

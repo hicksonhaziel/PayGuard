@@ -13,6 +13,8 @@
     "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort"
   },
   "dependencies": {
-    "@payguard/qvac-agent": "*"
+    "@payguard/qvac-agent": "*",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4"
   }
 }

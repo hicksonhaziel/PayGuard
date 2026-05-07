@@ -102,6 +102,13 @@ declare global {
           provider: "phantom" | "solflare" | "injected";
         }) => void
       ) => () => void;
+      startDirectSend: (input: {
+        amount: string;
+        network: "mainnet-beta" | "devnet";
+        recipientWallet: string;
+        senderWallet: string;
+        token: "USDC" | "USDT";
+      }) => Promise<{ signature: string }>;
       startExternalWalletConnect: () => Promise<{ url: string }>;
       store: {
         addPaymentHistory: (

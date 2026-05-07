@@ -3,6 +3,7 @@ import type { PaymentDecision } from "../App";
 
 interface ConfirmPageProps {
   decision: PaymentDecision | null;
+  error: string | null;
   onCancel: () => void;
   onDirectSend: () => void;
   onGuardedPayment: (guardedHoldHours: number) => void;
@@ -10,6 +11,7 @@ interface ConfirmPageProps {
 
 export function ConfirmPage({
   decision,
+  error,
   onCancel,
   onDirectSend,
   onGuardedPayment
@@ -103,6 +105,11 @@ export function ConfirmPage({
               </button>
             ) : null}
           </div>
+          {error ? (
+            <p className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-center text-xs font-semibold leading-5 text-[#9f1239] dark:border-rose-300/15 dark:bg-rose-300/10 dark:text-rose-300">
+              {error}
+            </p>
+          ) : null}
         </div>
       </section>
     </main>
@@ -377,6 +384,7 @@ function createFallbackDecision(): PaymentDecision {
     memo: "",
     guardedHoldHours: 24,
     selectedRoute: "Guarded Payment",
+    txSignature: undefined,
     verdict: {
       verdict: "Review",
       riskScore: 50,
