@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
   PaymentRagInput,
+  QvacOcrResult,
   RecipientRagResult,
   RiskVerdict,
   TrustedRecipientRecord
@@ -8,7 +9,6 @@ import type {
 import { TopNavigation } from "./components/layout/top-navigation";
 import { AnalyzeStatePage } from "./pages/analyze-state-page";
 import { ConfirmPage } from "./pages/confirm-page";
-import { ConfirmTransactionPage } from "./pages/confirm-transaction-page";
 import { HistoryPage } from "./pages/history-page";
 import { HomePage } from "./pages/home-page";
 import { NewPaymentPage } from "./pages/new-payment-page";
@@ -22,7 +22,6 @@ export type AppScreen =
   | "new-payment"
   | "analyzing"
   | "confirm"
-  | "confirm-transaction"
   | "success";
 export type ConnectedWallet = {
   address: string;
@@ -42,9 +41,11 @@ export type PaymentDecision = {
   recipientName: string;
   memo: string;
   selectedRoute: "Direct Send" | "Guarded Payment" | "Block";
+  guardedHoldHours: number;
   verdict: RiskVerdict;
 };
 export type PaymentAnalysisRequest = {
+  documentPath?: string;
   hasDocument: boolean;
   ocrRecipientName: string | null;
   ocrText?: string;
@@ -52,6 +53,7 @@ export type PaymentAnalysisRequest = {
   savedRecipientName: string | null;
   trustedRecipients: TrustedRecipientRecord[];
 };
+export type AnalysisStepKey = "ocr" | "rag" | "llm" | "explanation";
 
 const screenOrder: Record<AppScreen, number> = {
   home: 0,
@@ -60,8 +62,7 @@ const screenOrder: Record<AppScreen, number> = {
   "new-payment": 3,
   analyzing: 4,
   confirm: 5,
-  "confirm-transaction": 6,
-  success: 7
+  success: 6
 };
 const walletStorageKey = "payguard-connected-wallet";
 const networkStorageKey = "payguard-solana-network";
@@ -73,6 +74,7 @@ export default function App() {
     useState<PaymentDecision | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisHasDocument, setAnalysisHasDocument] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState<AnalysisStepKey>("rag");
   const [prefilledRecipient, setPrefilledRecipient] =
     useState<PrefilledRecipient | null>(null);
   const [connectedWallet, setConnectedWallet] =
@@ -138,6 +140,7 @@ export default function App() {
     setPaymentDecision(null);
     setAnalysisError(null);
     setAnalysisHasDocument(request.hasDocument);
+    setAnalysisStep(request.hasDocument ? "ocr" : "rag");
     navigateTo("analyzing");
     void runRiskAnalysis(request);
   }
@@ -152,17 +155,40 @@ export default function App() {
         throw new Error("Desktop QVAC LLM bridge is not available.");
       }
 
+      let ocrResult: QvacOcrResult | null = null;
+
+      if (request.hasDocument) {
+        if (!request.documentPath) {
+          throw new Error("A local document path is required for QVAC OCR.");
+        }
+
+        if (!window.payguardDesktop?.analyzeDocumentWithOcr) {
+          throw new Error("Desktop QVAC OCR bridge is not available.");
+        }
+
+        setAnalysisStep("ocr");
+        ocrResult = await window.payguardDesktop.analyzeDocumentWithOcr(request.documentPath);
+      }
+
+      const resolvedRequest = resolveAnalysisRequestFromOcr(request, ocrResult);
+
+      validateResolvedPayment(resolvedRequest.payment);
+
+      setAnalysisStep("rag");
       const recipientMatch = await window.payguardDesktop.matchRecipientWithRag({
-        ...request.payment,
+        ...resolvedRequest.payment,
         trustedRecipients: request.trustedRecipients
       });
+      setAnalysisStep("llm");
       const verdict = await window.payguardDesktop.analyzePaymentRisk({
-        payment: request.payment,
-        ocrText: request.ocrText,
+        payment: resolvedRequest.payment,
+        ocrText: resolvedRequest.ocrText,
         recipientMatch
       });
 
-      setPaymentDecision(buildPaymentDecision(request, recipientMatch, verdict));
+      setAnalysisStep("explanation");
+      await waitForMinimumStepVisibility();
+      setPaymentDecision(buildPaymentDecision(resolvedRequest, recipientMatch, verdict));
       navigateTo("confirm");
     } catch (error) {
       setAnalysisError(
@@ -179,18 +205,19 @@ export default function App() {
       });
     }
 
-    navigateTo("confirm-transaction");
+    navigateTo("success");
   }
 
-  function chooseGuardedPayment() {
+  function chooseGuardedPayment(guardedHoldHours: number) {
     if (paymentDecision) {
       setPaymentDecision({
         ...paymentDecision,
+        guardedHoldHours,
         selectedRoute: "Guarded Payment"
       });
     }
 
-    navigateTo("confirm-transaction");
+    navigateTo("success");
   }
 
   async function connectWallet() {
@@ -261,7 +288,6 @@ export default function App() {
     <div className="min-h-screen overflow-x-hidden bg-[#f7fafc] dark:bg-[#0f172a]">
       {visibleScreen !== "analyzing" &&
       visibleScreen !== "confirm" &&
-      visibleScreen !== "confirm-transaction" &&
       visibleScreen !== "success" ? (
         <TopNavigation
           activeScreen={activeScreen}
@@ -301,23 +327,27 @@ export default function App() {
           />
         ) : visibleScreen === "analyzing" ? (
           <AnalyzeStatePage
+            activeStepKey={analysisStep}
             error={analysisError}
             hasDocument={analysisHasDocument}
             onBack={() => navigateTo("new-payment")}
           />
         ) : visibleScreen === "confirm" ? (
-          <ConfirmPage
-            decision={paymentDecision}
-            onCancel={() => navigateTo("home")}
-            onDirectSend={completeDirectSend}
-            onGuardedPayment={chooseGuardedPayment}
-          />
-        ) : visibleScreen === "confirm-transaction" ? (
-          <ConfirmTransactionPage
-            decision={paymentDecision}
-            onBack={() => navigateTo("confirm")}
-            onSign={() => navigateTo("success")}
-          />
+          paymentDecision ? (
+            <ConfirmPage
+              decision={paymentDecision}
+              onCancel={() => navigateTo("home")}
+              onDirectSend={completeDirectSend}
+              onGuardedPayment={chooseGuardedPayment}
+            />
+          ) : (
+            <AnalyzeStatePage
+              activeStepKey="explanation"
+              error={analysisError}
+              hasDocument={analysisHasDocument}
+              onBack={() => navigateTo("new-payment")}
+            />
+          )
         ) : visibleScreen === "success" ? (
           <SuccessPage
             decision={paymentDecision}
@@ -339,6 +369,72 @@ export default function App() {
   );
 }
 
+function resolveAnalysisRequestFromOcr(
+  request: PaymentAnalysisRequest,
+  ocrResult: QvacOcrResult | null
+): PaymentAnalysisRequest {
+  if (!ocrResult) {
+    return request;
+  }
+
+  return {
+    ...request,
+    ocrRecipientName: request.ocrRecipientName ?? inferRecipientNameFromOcr(ocrResult.text),
+    ocrText: ocrResult.text,
+    payment: {
+      ...request.payment,
+      amount: request.payment.amount || ocrResult.hints.amounts[0],
+      ocrText: ocrResult.text,
+      recipientWallet:
+        request.payment.recipientWallet ||
+        ocrResult.hints.possibleWallets[0] ||
+        ocrResult.hints.addressLikeValues[0]
+    }
+  };
+}
+
+function validateResolvedPayment(payment: PaymentRagInput) {
+  if (!payment.recipientWallet?.trim()) {
+    throw new Error("Could not find a recipient wallet in the payment details or uploaded document.");
+  }
+
+  if (!payment.amount?.trim()) {
+    throw new Error("Could not find an amount in the payment details or uploaded document.");
+  }
+}
+
+function inferRecipientNameFromOcr(text?: string) {
+  if (!text) {
+    return null;
+  }
+
+  const merchantMatch = text.match(/Merchant Name\s*\n?(.+)/i);
+  const walletIndex = text.toLowerCase().indexOf("wallet address");
+
+  if (merchantMatch?.[1]) {
+    return merchantMatch[1].trim();
+  }
+
+  if (walletIndex > 0) {
+    return (
+      text
+        .slice(0, walletIndex)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1) ?? null
+    );
+  }
+
+  return null;
+}
+
+function waitForMinimumStepVisibility() {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 450);
+  });
+}
+
 function buildPaymentDecision(
   request: PaymentAnalysisRequest,
   recipientMatch: RecipientRagResult | null,
@@ -354,6 +450,7 @@ function buildPaymentDecision(
       request.ocrRecipientName ||
       "Unknown recipient",
     memo: request.payment.memo || "",
+    guardedHoldHours: 24,
     selectedRoute: verdict.recommendedRoute,
     verdict
   };

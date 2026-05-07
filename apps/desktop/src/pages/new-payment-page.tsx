@@ -96,7 +96,10 @@ export function NewPaymentPage({
     error: null
   });
   const [hasAttemptedAnalyze, setHasAttemptedAnalyze] = useState(false);
-  const validationErrors = validatePaymentInput(buildPaymentRagInput());
+  const validationErrors = validatePaymentInput(
+    buildPaymentRagInput(),
+    Boolean(uploadedDocument)
+  );
 
   function buildPaymentRagInput(
     ocrResult = ocrState.result,
@@ -114,47 +117,13 @@ export function NewPaymentPage({
     };
   }
 
-  async function runRecipientMatch(ragInput: PaymentRagInput) {
-    if (!window.payguardDesktop?.matchRecipientWithRag) {
-      setRagState({
-        status: "error",
-        result: null,
-        error: "Desktop QVAC RAG bridge is not available."
-      });
-      return null;
-    }
-
-    setRagState({
-      status: "running",
-      result: null,
-      error: null
-    });
-
-    try {
-      const result = await window.payguardDesktop.matchRecipientWithRag({
-        ...ragInput,
-        trustedRecipients: buildTrustedRecipientRecords(recipients)
-      });
-      setRagState({
-        status: "complete",
-        result,
-        error: null
-      });
-      return result;
-    } catch (error) {
-      setRagState({
-        status: "error",
-        result: null,
-        error: error instanceof Error ? error.message : "QVAC RAG matching failed."
-      });
-      return null;
-    }
-  }
-
   async function handleAnalyzePayment() {
     setHasAttemptedAnalyze(true);
 
-    const currentValidationErrors = validatePaymentInput(buildPaymentRagInput());
+    const currentValidationErrors = validatePaymentInput(
+      buildPaymentRagInput(),
+      Boolean(uploadedDocument)
+    );
 
     if (Object.keys(currentValidationErrors).length) {
       setRiskState({
@@ -180,6 +149,7 @@ export function NewPaymentPage({
       error: null
     });
     onAnalyze({
+      documentPath: uploadedDocument?.path,
       hasDocument: Boolean(uploadedDocument),
       ocrRecipientName: inferRecipientNameFromOcr(ocrState.result?.text),
       ocrText: ocrState.result?.text,
@@ -251,36 +221,11 @@ export function NewPaymentPage({
       return;
     }
 
-    if (!window.payguardDesktop?.analyzeDocumentWithOcr) {
-      setOcrState({
-        status: "error",
-        result: null,
-        error: "Desktop QVAC bridge is not available."
-      });
-      return;
-    }
-
     setOcrState({
-      status: "running",
+      status: "idle",
       result: null,
       error: null
     });
-
-    try {
-      const result = await window.payguardDesktop.analyzeDocumentWithOcr(filePath);
-      setOcrState({
-        status: "complete",
-        result,
-        error: null
-      });
-      await runRecipientMatch(buildPaymentRagInput(result, paymentDraft));
-    } catch (error) {
-      setOcrState({
-        status: "error",
-        result: null,
-        error: error instanceof Error ? error.message : "QVAC OCR failed."
-      });
-    }
   }
 
   useEffect(() => {
@@ -404,20 +349,27 @@ function inferRecipientNameFromOcr(text?: string) {
   return null;
 }
 
-function validatePaymentInput(input: PaymentRagInput): PaymentValidationErrors {
+function validatePaymentInput(
+  input: PaymentRagInput,
+  allowDocumentExtraction = false
+): PaymentValidationErrors {
   const errors: PaymentValidationErrors = {};
   const walletAddress = input.recipientWallet?.trim() ?? "";
   const amount = input.amount?.trim() ?? "";
   const numericAmount = Number(amount);
 
   if (!walletAddress) {
-    errors.walletAddress = "Enter a recipient Solana wallet address.";
+    if (!allowDocumentExtraction) {
+      errors.walletAddress = "Enter a recipient Solana wallet address.";
+    }
   } else if (!isValidSolanaPublicKey(walletAddress)) {
     errors.walletAddress = "Enter a valid Solana wallet address.";
   }
 
   if (!amount) {
-    errors.amount = "Enter an amount to pay.";
+    if (!allowDocumentExtraction) {
+      errors.amount = "Enter an amount to pay.";
+    }
   } else if (!Number.isFinite(numericAmount)) {
     errors.amount = "Enter a valid numeric amount.";
   } else if (numericAmount <= 0) {
@@ -850,7 +802,7 @@ function DocumentPreviewCard({ document, ocrState, ragState }: DocumentPreviewCa
             </div>
           ) : (
             <p className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
-              OCR results will appear here after an image upload.
+              OCR will run on the secure analyzing screen after you continue.
             </p>
           )}
         </div>
@@ -880,7 +832,7 @@ function DocumentPreviewCard({ document, ocrState, ragState }: DocumentPreviewCa
             <RecipientMatchSummary result={ragState.result} />
           ) : (
             <p className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
-              Recipient matching runs after OCR completes.
+              Recipient matching will run on the secure analyzing screen.
             </p>
           )}
         </div>

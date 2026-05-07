@@ -32,6 +32,15 @@ export function SuccessPage({
       value: displayDecision.selectedRoute,
       tag: displayDecision.selectedRoute === "Guarded Payment" ? "Escrow" : "Direct"
     },
+    ...(displayDecision.selectedRoute === "Guarded Payment"
+      ? [
+          {
+            label: "Claim Window",
+            value: `${displayDecision.guardedHoldHours} hours`,
+            tag: "Hold"
+          }
+        ]
+      : []),
     {
       label: "Risk Score",
       value: `${displayDecision.verdict.riskScore}/100`
@@ -215,6 +224,7 @@ function createFallbackDecision(): PaymentDecision {
     walletAddress: "Unknown wallet",
     recipientName: "Unknown recipient",
     memo: "",
+    guardedHoldHours: 24,
     selectedRoute: "Guarded Payment",
     verdict: {
       verdict: "Review",

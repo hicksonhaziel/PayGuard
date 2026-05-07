@@ -1,22 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import type { AnalysisStepKey } from "../App";
 
 interface AnalyzeStatePageProps {
+  activeStepKey: AnalysisStepKey;
   error: string | null;
   hasDocument: boolean;
   onBack: () => void;
 }
 
 const manualAnalysisSteps = [
-  "Loading local trusted recipient data...",
-  "Performing risk analysis with local LLM...",
-  "Generating explanation..."
+  { key: "rag", label: "Loading local trusted recipient data..." },
+  { key: "llm", label: "Performing risk analysis with local LLM..." },
+  { key: "explanation", label: "Generating explanation..." }
 ] as const;
 const documentAnalysisSteps = [
-  "Running QVAC OCR on document...",
+  { key: "ocr", label: "Running QVAC OCR on document..." },
   ...manualAnalysisSteps
 ] as const;
 
 export function AnalyzeStatePage({
+  activeStepKey,
   error,
   hasDocument,
   onBack
@@ -25,25 +28,10 @@ export function AnalyzeStatePage({
     () => (hasDocument ? documentAnalysisSteps : manualAnalysisSteps),
     [hasDocument]
   );
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-
-  useEffect(() => {
-    setActiveStepIndex(0);
-  }, [analysisSteps]);
-
-  useEffect(() => {
-    if (error) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      setActiveStepIndex((currentIndex) =>
-        Math.min(currentIndex + 1, analysisSteps.length - 1)
-      );
-    }, 950);
-
-    return () => window.clearInterval(interval);
-  }, [analysisSteps.length, error]);
+  const activeStepIndex = Math.max(
+    analysisSteps.findIndex((step) => step.key === activeStepKey),
+    0
+  );
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[#f7fafc] px-6 py-10 dark:bg-[#0f172a]">
@@ -66,7 +54,7 @@ export function AnalyzeStatePage({
 
         <div className="w-full rounded-2xl border border-[#e0e3e5]/70 bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
           <ul className="flex flex-col gap-2">
-            {analysisSteps.map((label, index) => {
+            {analysisSteps.map((step, index) => {
               const state =
                 error && index === activeStepIndex
                   ? "error"
@@ -85,7 +73,7 @@ export function AnalyzeStatePage({
                       ? "opacity-55"
                       : "hover:bg-[#f1f4f6] dark:hover:bg-white/[0.04]"
                 }`}
-                key={label}
+                key={step.key}
               >
                 {state === "active" ? (
                   <span className="h-7 w-7 shrink-0 rounded-full border-2 border-[#006c49]/30 border-t-[#006c49] pg-spinner dark:border-[#6ffbbe]/30 dark:border-t-[#6ffbbe]" />
@@ -116,7 +104,7 @@ export function AnalyzeStatePage({
                         : "text-[#181c1e] dark:text-slate-300"
                   }`}
                 >
-                  {label}
+                  {step.label}
                 </span>
               </li>
               );
