@@ -1,28 +1,50 @@
+import { useEffect, useMemo, useState } from "react";
+
 interface AnalyzeStatePageProps {
   error: string | null;
+  hasDocument: boolean;
   onBack: () => void;
 }
 
-const analysisSteps = [
-  {
-    label: "Running QVAC OCR on document...",
-    state: "complete"
-  },
-  {
-    label: "Loading local trusted recipient data...",
-    state: "complete"
-  },
-  {
-    label: "Performing risk analysis with local LLM...",
-    state: "complete"
-  },
-  {
-    label: "Generating explanation...",
-    state: "active"
-  }
+const manualAnalysisSteps = [
+  "Loading local trusted recipient data...",
+  "Performing risk analysis with local LLM...",
+  "Generating explanation..."
+] as const;
+const documentAnalysisSteps = [
+  "Running QVAC OCR on document...",
+  ...manualAnalysisSteps
 ] as const;
 
-export function AnalyzeStatePage({ error, onBack }: AnalyzeStatePageProps) {
+export function AnalyzeStatePage({
+  error,
+  hasDocument,
+  onBack
+}: AnalyzeStatePageProps) {
+  const analysisSteps = useMemo(
+    () => (hasDocument ? documentAnalysisSteps : manualAnalysisSteps),
+    [hasDocument]
+  );
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveStepIndex(0);
+  }, [analysisSteps]);
+
+  useEffect(() => {
+    if (error) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setActiveStepIndex((currentIndex) =>
+        Math.min(currentIndex + 1, analysisSteps.length - 1)
+      );
+    }, 950);
+
+    return () => window.clearInterval(interval);
+  }, [analysisSteps.length, error]);
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[#f7fafc] px-6 py-10 dark:bg-[#0f172a]">
       <section className="flex w-full max-w-xl flex-col items-center">
@@ -44,17 +66,39 @@ export function AnalyzeStatePage({ error, onBack }: AnalyzeStatePageProps) {
 
         <div className="w-full rounded-2xl border border-[#e0e3e5]/70 bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
           <ul className="flex flex-col gap-2">
-            {analysisSteps.map((step) => (
+            {analysisSteps.map((label, index) => {
+              const state =
+                error && index === activeStepIndex
+                  ? "error"
+                  : index < activeStepIndex
+                    ? "complete"
+                    : index === activeStepIndex
+                      ? "active"
+                      : "pending";
+
+              return (
               <li
                 className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-colors ${
-                  step.state === "active" && !error
+                  state === "active"
                     ? "border border-[#e0e3e5] bg-[#f1f4f6] dark:border-white/10 dark:bg-white/[0.05]"
-                    : "hover:bg-[#f1f4f6] dark:hover:bg-white/[0.04]"
+                    : state === "pending"
+                      ? "opacity-55"
+                      : "hover:bg-[#f1f4f6] dark:hover:bg-white/[0.04]"
                 }`}
-                key={step.label}
+                key={label}
               >
-                {step.state === "active" && !error ? (
+                {state === "active" ? (
                   <span className="h-7 w-7 shrink-0 rounded-full border-2 border-[#006c49]/30 border-t-[#006c49] pg-spinner dark:border-[#6ffbbe]/30 dark:border-t-[#6ffbbe]" />
+                ) : state === "error" ? (
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-500/15">
+                    <span className="material-symbols-outlined text-sm text-[#9f1239] dark:text-rose-300 [font-variation-settings:'FILL'_1,'wght'_400,'GRAD'_0,'opsz'_24]">
+                      error
+                    </span>
+                  </span>
+                ) : state === "pending" ? (
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#c6c6cc] dark:border-white/15">
+                    <span className="h-2 w-2 rounded-full bg-[#76777c] dark:bg-slate-500" />
+                  </span>
                 ) : (
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#006c49]/10">
                     <span className="material-symbols-outlined text-sm text-[#006c49] dark:text-[#6ffbbe] [font-variation-settings:'FILL'_1,'wght'_400,'GRAD'_0,'opsz'_24]">
@@ -65,15 +109,18 @@ export function AnalyzeStatePage({ error, onBack }: AnalyzeStatePageProps) {
 
                 <span
                   className={`text-sm leading-6 ${
-                    step.state === "active"
+                    state === "active"
                       ? "font-semibold text-[#1a202c] dark:text-white"
-                      : "text-[#181c1e] dark:text-slate-300"
+                      : state === "error"
+                        ? "font-semibold text-[#9f1239] dark:text-rose-300"
+                        : "text-[#181c1e] dark:text-slate-300"
                   }`}
                 >
-                  {step.label}
+                  {label}
                 </span>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
         {error ? (

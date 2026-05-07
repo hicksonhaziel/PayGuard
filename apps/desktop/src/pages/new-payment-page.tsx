@@ -180,6 +180,7 @@ export function NewPaymentPage({
       error: null
     });
     onAnalyze({
+      hasDocument: Boolean(uploadedDocument),
       ocrRecipientName: inferRecipientNameFromOcr(ocrState.result?.text),
       ocrText: ocrState.result?.text,
       payment: ragInput,

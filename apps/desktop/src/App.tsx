@@ -45,6 +45,7 @@ export type PaymentDecision = {
   verdict: RiskVerdict;
 };
 export type PaymentAnalysisRequest = {
+  hasDocument: boolean;
   ocrRecipientName: string | null;
   ocrText?: string;
   payment: PaymentRagInput;
@@ -71,6 +72,7 @@ export default function App() {
   const [paymentDecision, setPaymentDecision] =
     useState<PaymentDecision | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisHasDocument, setAnalysisHasDocument] = useState(false);
   const [prefilledRecipient, setPrefilledRecipient] =
     useState<PrefilledRecipient | null>(null);
   const [connectedWallet, setConnectedWallet] =
@@ -135,6 +137,7 @@ export default function App() {
   function startRiskAnalysis(request: PaymentAnalysisRequest) {
     setPaymentDecision(null);
     setAnalysisError(null);
+    setAnalysisHasDocument(request.hasDocument);
     navigateTo("analyzing");
     void runRiskAnalysis(request);
   }
@@ -299,6 +302,7 @@ export default function App() {
         ) : visibleScreen === "analyzing" ? (
           <AnalyzeStatePage
             error={analysisError}
+            hasDocument={analysisHasDocument}
             onBack={() => navigateTo("new-payment")}
           />
         ) : visibleScreen === "confirm" ? (
