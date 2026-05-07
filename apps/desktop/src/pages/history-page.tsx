@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ConnectedWallet, SolanaNetwork } from "../App";
 
-const historyTabs = ["All Payments", "Direct", "Guarded", "Blocked"];
+const historyTabs = ["All Payments", "Direct", "Guarded", "Blocked"] as const;
 
 type StoredPaymentHistory = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listPaymentHistory"]>
 >[number];
+type HistoryTab = (typeof historyTabs)[number];
 
 export function HistoryPage({
   network,
@@ -17,6 +18,8 @@ export function HistoryPage({
   const [transactions, setTransactions] = useState<StoredPaymentHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<HistoryTab>("All Payments");
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     async function loadHistory() {
@@ -46,6 +49,40 @@ export function HistoryPage({
     void loadHistory();
   }, [wallet?.address, network]);
 
+  const filteredTransactions = transactions.filter((transaction) => {
+    const matchesTab =
+      activeTab === "All Payments" ||
+      (activeTab === "Direct" && transaction.route === "Direct Send") ||
+      (activeTab === "Guarded" && transaction.route === "Guarded Payment") ||
+      (activeTab === "Blocked" &&
+        (transaction.route === "Block" || transaction.verdict === "Block"));
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+
+    if (!matchesTab) {
+      return false;
+    }
+
+    if (!normalizedSearch) {
+      return true;
+    }
+
+    return [
+      transaction.amount,
+      transaction.memo,
+      transaction.network,
+      transaction.recipientName,
+      transaction.recipientWallet,
+      transaction.route,
+      transaction.senderWallet,
+      transaction.summary,
+      transaction.token,
+      transaction.txSignature,
+      transaction.verdict
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+  });
+
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-6 dark:bg-[#0f172a] max-lg:px-5">
       <div className="mx-auto w-full max-w-[1200px]">
@@ -66,17 +103,12 @@ export function HistoryPage({
               </span>
               <input
                 className="w-full rounded-lg border border-[#c6c6cc] bg-white py-1.5 pl-10 pr-4 text-sm text-[#181c1e] outline-none transition-all placeholder:text-[#76777c] focus:border-[#1a202c] focus:ring-2 focus:ring-[#6cf8bb]/40 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:focus:border-[#6ffbbe]"
+                onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Search transactions..."
                 type="text"
+                value={searchQuery}
               />
             </label>
-            <button
-              className="flex items-center gap-1.5 rounded-lg border border-[#1a202c] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-[#1a202c] transition-colors hover:bg-[#ebeef0] dark:border-white/80 dark:text-white dark:hover:bg-white/10"
-              type="button"
-            >
-              <span className="material-symbols-outlined text-[15px]">tune</span>
-              Filter
-            </button>
           </div>
         </section>
 
@@ -84,11 +116,12 @@ export function HistoryPage({
           {historyTabs.map((tab) => (
             <button
               className={`whitespace-nowrap px-4 py-2.5 text-sm font-semibold transition-colors ${
-                tab === "All Payments"
+                tab === activeTab
                   ? "border-b-2 border-[#006c49] text-[#006c49] dark:border-[#6ffbbe] dark:text-[#6ffbbe]"
                   : "text-[#45474c] hover:text-[#181c1e] dark:text-slate-400 dark:hover:text-white"
               }`}
               key={tab}
+              onClick={() => setActiveTab(tab)}
               type="button"
             >
               {tab}
@@ -108,15 +141,17 @@ export function HistoryPage({
           <p className="text-sm text-[#45474c] dark:text-slate-400">
             Loading local payment history...
           </p>
-        ) : transactions.length ? (
+        ) : filteredTransactions.length ? (
           <section className="grid gap-3">
-            {transactions.map((transaction) => (
+            {filteredTransactions.map((transaction) => (
               <TransactionCard key={transaction.id} transaction={transaction} />
             ))}
           </section>
         ) : (
           <div className="rounded-2xl border border-[#e0e3e5] bg-white p-6 text-sm text-[#45474c] dark:border-white/10 dark:bg-[#111827] dark:text-slate-400">
-            No PayGuard payment history yet.
+            {transactions.length
+              ? "No history matches this search or payment type."
+              : "No PayGuard payment history yet."}
           </div>
         )}
       </div>
