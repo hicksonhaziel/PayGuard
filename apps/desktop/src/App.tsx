@@ -352,7 +352,9 @@ export default function App() {
       visibleScreen !== "success" ? (
         <TopNavigation
           activeScreen={activeScreen}
+          network={selectedNetwork}
           onNavigate={navigateTo}
+          wallet={connectedWallet}
         />
       ) : null}
 
