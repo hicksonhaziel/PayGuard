@@ -25,6 +25,7 @@ export type ConnectedWallet = {
   label: string;
   provider: "phantom" | "solflare" | "injected";
 };
+export type SolanaNetwork = "mainnet-beta" | "devnet";
 export type PrefilledRecipient = {
   name: string;
   walletAddress: string;
@@ -50,6 +51,7 @@ const screenOrder: Record<AppScreen, number> = {
   success: 7
 };
 const walletStorageKey = "payguard-connected-wallet";
+const networkStorageKey = "payguard-solana-network";
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<AppScreen>("home");
@@ -60,6 +62,8 @@ export default function App() {
     useState<PrefilledRecipient | null>(null);
   const [connectedWallet, setConnectedWallet] =
     useState<ConnectedWallet | null>(() => loadStoredWallet());
+  const [selectedNetwork, setSelectedNetwork] =
+    useState<SolanaNetwork>(() => loadStoredNetwork());
   const [walletError, setWalletError] = useState<string | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   const [transitionDirection, setTransitionDirection] = useState<
@@ -201,6 +205,11 @@ export default function App() {
     window.localStorage.removeItem(walletStorageKey);
   }
 
+  function changeNetwork(network: SolanaNetwork) {
+    setSelectedNetwork(network);
+    window.localStorage.setItem(networkStorageKey, network);
+  }
+
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f7fafc] dark:bg-[#0f172a]">
       {visibleScreen !== "analyzing" &&
@@ -225,17 +234,24 @@ export default function App() {
       >
         {visibleScreen === "home" ? (
           <HomePage
+            network={selectedNetwork}
             wallet={connectedWallet}
             walletError={walletError}
             onConnectWallet={connectWallet}
             onDisconnectWallet={disconnectWallet}
+            onNetworkChange={changeNetwork}
             onStartPayment={startNewPayment}
+            onViewHistory={() => navigateTo("history")}
             onViewRecipients={() => navigateTo("recipients")}
           />
         ) : visibleScreen === "history" ? (
-          <HistoryPage wallet={connectedWallet} />
+          <HistoryPage network={selectedNetwork} wallet={connectedWallet} />
         ) : visibleScreen === "recipients" ? (
-          <RecipientsPage wallet={connectedWallet} onStartPayment={startNewPayment} />
+          <RecipientsPage
+            network={selectedNetwork}
+            wallet={connectedWallet}
+            onStartPayment={startNewPayment}
+          />
         ) : visibleScreen === "analyzing" ? (
           <AnalyzeStatePage onComplete={() => navigateTo("confirm")} />
         ) : visibleScreen === "confirm" ? (
@@ -254,11 +270,13 @@ export default function App() {
         ) : visibleScreen === "success" ? (
           <SuccessPage
             decision={paymentDecision}
+            network={selectedNetwork}
             wallet={connectedWallet}
             onNewPayment={() => startNewPayment()}
           />
         ) : (
           <NewPaymentPage
+            network={selectedNetwork}
             wallet={connectedWallet}
             prefilledRecipient={prefilledRecipient}
             onBack={() => navigateTo("home")}
@@ -268,6 +286,18 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function loadStoredNetwork(): SolanaNetwork {
+  if (typeof window === "undefined") {
+    return "mainnet-beta";
+  }
+
+  const network = window.localStorage.getItem(networkStorageKey);
+
+  return network === "devnet" || network === "mainnet-beta"
+    ? network
+    : "mainnet-beta";
 }
 
 function loadStoredWallet(): ConnectedWallet | null {

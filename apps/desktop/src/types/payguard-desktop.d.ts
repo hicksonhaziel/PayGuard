@@ -8,6 +8,7 @@ import type {
 
 type StoredRecipient = {
   id: string;
+  network: "mainnet-beta" | "devnet";
   ownerWallet: string;
   name: string;
   walletAddress: string;
@@ -26,6 +27,7 @@ type RecipientSummary = StoredRecipient & {
 
 type StoredPaymentHistory = {
   id: string;
+  network: "mainnet-beta" | "devnet";
   ownerWallet: string;
   recipientId: string | null;
   recipientName: string;
@@ -45,6 +47,7 @@ type StoredPaymentHistory = {
 
 type StoredOnchainImport = {
   id: string;
+  network: "mainnet-beta" | "devnet";
   walletAddress: string;
   recipientWallet: string;
   status: "pending" | "completed" | "failed";
@@ -78,7 +81,10 @@ declare global {
       analyzeDocumentWithOcr: (imagePath: string) => Promise<QvacOcrResult>;
       analyzePaymentRisk: (input: RiskAnalysisInput) => Promise<RiskVerdict>;
       getPathForFile: (file: File) => string;
-      getWalletBalances: (walletAddress: string) => Promise<{
+      getWalletBalances: (input: {
+        network: "mainnet-beta" | "devnet";
+        walletAddress: string;
+      }) => Promise<{
         SOL: number | null;
         USDC: number | null;
         USDT: number | null;
@@ -106,13 +112,23 @@ declare global {
         addRecipient: (input: {
           category?: string;
           name?: string;
+          network: "mainnet-beta" | "devnet";
           notes?: string;
           ownerWallet: string;
           walletAddress: string;
         }) => Promise<StoredRecipient>;
-        listOnchainImports: (ownerWallet: string) => Promise<StoredOnchainImport[]>;
-        listPaymentHistory: (ownerWallet: string) => Promise<StoredPaymentHistory[]>;
-        listRecipients: (ownerWallet: string) => Promise<RecipientSummary[]>;
+        listOnchainImports: (input: {
+          network: "mainnet-beta" | "devnet";
+          ownerWallet: string;
+        }) => Promise<StoredOnchainImport[]>;
+        listPaymentHistory: (input: {
+          network: "mainnet-beta" | "devnet";
+          ownerWallet: string;
+        }) => Promise<StoredPaymentHistory[]>;
+        listRecipients: (input: {
+          network: "mainnet-beta" | "devnet";
+          ownerWallet: string;
+        }) => Promise<RecipientSummary[]>;
       };
       starterMessage: string;
     };

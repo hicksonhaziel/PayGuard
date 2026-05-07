@@ -1,14 +1,20 @@
 import { useEffect, useRef } from "react";
 import type { PaymentDecision } from "../App";
-import type { ConnectedWallet } from "../App";
+import type { ConnectedWallet, SolanaNetwork } from "../App";
 
 interface SuccessPageProps {
   decision: PaymentDecision | null;
+  network: SolanaNetwork;
   wallet: ConnectedWallet | null;
   onNewPayment: () => void;
 }
 
-export function SuccessPage({ decision, wallet, onNewPayment }: SuccessPageProps) {
+export function SuccessPage({
+  decision,
+  network,
+  wallet,
+  onNewPayment
+}: SuccessPageProps) {
   const displayDecision = decision ?? createFallbackDecision();
   const savedReceiptRef = useRef(false);
   const receiptDetails = [
@@ -40,6 +46,7 @@ export function SuccessPage({ decision, wallet, onNewPayment }: SuccessPageProps
     savedReceiptRef.current = true;
     void window.payguardDesktop?.store.addPaymentHistory({
       amount: decision.amount,
+      network,
       ownerWallet: wallet.address,
       recipientName: decision.recipientName,
       recipientWallet: decision.walletAddress,
@@ -52,7 +59,7 @@ export function SuccessPage({ decision, wallet, onNewPayment }: SuccessPageProps
       txSignature: `demo-${crypto.randomUUID()}`,
       verdict: decision.verdict.verdict
     });
-  }, [decision, wallet?.address]);
+  }, [decision, network, wallet?.address]);
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] px-6 py-5 dark:bg-[#0f172a]">

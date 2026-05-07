@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConnectedWallet } from "../App";
+import type { ConnectedWallet, SolanaNetwork } from "../App";
 
 const historyTabs = ["All Payments", "Direct", "Guarded", "Blocked"];
 
@@ -7,7 +7,13 @@ type StoredPaymentHistory = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listPaymentHistory"]>
 >[number];
 
-export function HistoryPage({ wallet }: { wallet: ConnectedWallet | null }) {
+export function HistoryPage({
+  network,
+  wallet
+}: {
+  network: SolanaNetwork;
+  wallet: ConnectedWallet | null;
+}) {
   const [transactions, setTransactions] = useState<StoredPaymentHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +30,10 @@ export function HistoryPage({ wallet }: { wallet: ConnectedWallet | null }) {
       try {
         setIsLoading(true);
         setTransactions(
-          await window.payguardDesktop!.store.listPaymentHistory(wallet.address)
+          await window.payguardDesktop!.store.listPaymentHistory({
+            network,
+            ownerWallet: wallet.address
+          })
         );
         setError(null);
       } catch (loadError) {
@@ -35,7 +44,7 @@ export function HistoryPage({ wallet }: { wallet: ConnectedWallet | null }) {
     }
 
     void loadHistory();
-  }, [wallet?.address]);
+  }, [wallet?.address, network]);
 
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-6 dark:bg-[#0f172a] max-lg:px-5">

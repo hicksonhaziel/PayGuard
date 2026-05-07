@@ -5,6 +5,7 @@ import { app } from "electron";
 
 export type StoredRecipient = {
   id: string;
+  network: string;
   ownerWallet: string;
   name: string;
   walletAddress: string;
@@ -17,6 +18,7 @@ export type StoredRecipient = {
 
 export type StoredPaymentHistory = {
   id: string;
+  network: string;
   ownerWallet: string;
   recipientId: string | null;
   recipientName: string;
@@ -36,6 +38,7 @@ export type StoredPaymentHistory = {
 
 export type StoredOnchainImport = {
   id: string;
+  network: string;
   walletAddress: string;
   recipientWallet: string;
   status: "pending" | "completed" | "failed";
@@ -64,13 +67,14 @@ export function getLocalStore() {
   return database;
 }
 
-export function listRecipients(ownerWallet: string): RecipientSummary[] {
+export function listRecipients(ownerWallet: string, network: string): RecipientSummary[] {
   const db = getLocalStore();
 
   return db
     .prepare(`
       SELECT
         r.id,
+        r.network,
         r.owner_wallet AS ownerWallet,
         r.name,
         r.wallet_address AS walletAddress,
@@ -87,17 +91,20 @@ export function listRecipients(ownerWallet: string): RecipientSummary[] {
       LEFT JOIN payment_history h
         ON h.recipient_id = r.id
        AND h.owner_wallet = r.owner_wallet
+       AND h.network = r.network
       WHERE r.owner_wallet = ?
+        AND r.network = ?
       GROUP BY r.id
       ORDER BY r.updated_at DESC
     `)
-    .all(ownerWallet)
+    .all(ownerWallet, network)
     .map((row) => {
       const record = row as Record<string, unknown>;
       const averageAmountValue = Number(record.averageAmountValue ?? 0);
 
       return {
         id: String(record.id),
+        network: String(record.network),
         ownerWallet: String(record.ownerWallet),
         name: String(record.name),
         walletAddress: String(record.walletAddress),
@@ -125,6 +132,7 @@ export function addRecipient(input: {
   category?: string;
   name?: string;
   notes?: string;
+  network: string;
   ownerWallet: string;
   walletAddress: string;
 }) {
@@ -132,6 +140,7 @@ export function addRecipient(input: {
   const now = new Date().toISOString();
   const recipient: StoredRecipient = {
     id: randomUUID(),
+    network: input.network,
     ownerWallet: input.ownerWallet,
     name: input.name?.trim() || formatWalletLabel(input.walletAddress),
     walletAddress: input.walletAddress,
@@ -144,11 +153,12 @@ export function addRecipient(input: {
 
   db.prepare(`
     INSERT INTO recipients (
-      id, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
+      id, network, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     recipient.id,
+    recipient.network,
     recipient.ownerWallet,
     recipient.name,
     recipient.walletAddress,
@@ -162,13 +172,14 @@ export function addRecipient(input: {
   return recipient;
 }
 
-export function listPaymentHistory(ownerWallet: string): StoredPaymentHistory[] {
+export function listPaymentHistory(ownerWallet: string, network: string): StoredPaymentHistory[] {
   const db = getLocalStore();
 
   return db
     .prepare(`
       SELECT
         id,
+        network,
         owner_wallet AS ownerWallet,
         recipient_id AS recipientId,
         recipient_name AS recipientName,
@@ -186,15 +197,17 @@ export function listPaymentHistory(ownerWallet: string): StoredPaymentHistory[] 
         created_at AS createdAt
       FROM payment_history
       WHERE owner_wallet = ?
+        AND network = ?
       ORDER BY paid_at DESC
       LIMIT 100
     `)
-    .all(ownerWallet)
+    .all(ownerWallet, network)
     .map((row) => normalizePaymentHistory(row as Record<string, unknown>));
 }
 
 export function addPaymentHistory(input: {
   amount: string;
+  network: string;
   ownerWallet: string;
   recipientName: string;
   recipientWallet: string;
@@ -211,11 +224,13 @@ export function addPaymentHistory(input: {
   const now = new Date().toISOString();
   const recipientId = findOrCreateRecipient(
     input.ownerWallet,
+    input.network,
     input.recipientName,
     input.recipientWallet
   );
   const history: StoredPaymentHistory = {
     id: randomUUID(),
+    network: input.network,
     ownerWallet: input.ownerWallet,
     recipientId,
     recipientName: input.recipientName,
@@ -235,12 +250,13 @@ export function addPaymentHistory(input: {
 
   db.prepare(`
     INSERT INTO payment_history (
-      id, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
+      id, network, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
       route, verdict, risk_score, tx_signature, source, summary, paid_at, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     history.id,
+    history.network,
     history.ownerWallet,
     history.recipientId,
     history.recipientName,
@@ -261,13 +277,14 @@ export function addPaymentHistory(input: {
   return history;
 }
 
-export function listOnchainImports(ownerWallet: string): StoredOnchainImport[] {
+export function listOnchainImports(ownerWallet: string, network: string): StoredOnchainImport[] {
   const db = getLocalStore();
 
   return db
     .prepare(`
       SELECT
         id,
+        network,
         wallet_address AS walletAddress,
         recipient_wallet AS recipientWallet,
         status,
@@ -278,15 +295,17 @@ export function listOnchainImports(ownerWallet: string): StoredOnchainImport[] {
         error
       FROM onchain_imports
       WHERE wallet_address = ?
+        AND network = ?
       ORDER BY started_at DESC
       LIMIT 50
     `)
-    .all(ownerWallet)
+    .all(ownerWallet, network)
     .map((row) => {
       const record = row as Record<string, unknown>;
 
       return {
         id: String(record.id),
+        network: String(record.network),
         walletAddress: String(record.walletAddress),
         recipientWallet: String(record.recipientWallet),
         status: record.status as StoredOnchainImport["status"],
@@ -312,6 +331,7 @@ function initializeDatabase(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS recipients (
       id TEXT PRIMARY KEY,
+      network TEXT NOT NULL DEFAULT 'mainnet-beta',
       owner_wallet TEXT NOT NULL,
       name TEXT NOT NULL,
       wallet_address TEXT NOT NULL,
@@ -320,11 +340,12 @@ function initializeDatabase(db: DatabaseSync) {
       trusted_since TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(owner_wallet, wallet_address)
+      UNIQUE(owner_wallet, network, wallet_address)
     );
 
     CREATE TABLE IF NOT EXISTS payment_history (
       id TEXT PRIMARY KEY,
+      network TEXT NOT NULL DEFAULT 'mainnet-beta',
       owner_wallet TEXT NOT NULL,
       recipient_id TEXT,
       recipient_name TEXT NOT NULL,
@@ -335,16 +356,18 @@ function initializeDatabase(db: DatabaseSync) {
       route TEXT NOT NULL,
       verdict TEXT NOT NULL,
       risk_score INTEGER NOT NULL,
-      tx_signature TEXT NOT NULL UNIQUE,
+      tx_signature TEXT NOT NULL,
       source TEXT NOT NULL,
       summary TEXT NOT NULL DEFAULT '',
       paid_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      UNIQUE(network, tx_signature),
       FOREIGN KEY (recipient_id) REFERENCES recipients(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS onchain_imports (
       id TEXT PRIMARY KEY,
+      network TEXT NOT NULL DEFAULT 'mainnet-beta',
       wallet_address TEXT NOT NULL,
       recipient_wallet TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -358,11 +381,11 @@ function initializeDatabase(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_payment_history_recipient_id
       ON payment_history(recipient_id);
     CREATE INDEX IF NOT EXISTS idx_payment_history_owner_wallet
-      ON payment_history(owner_wallet);
+      ON payment_history(owner_wallet, network);
     CREATE INDEX IF NOT EXISTS idx_payment_history_paid_at
       ON payment_history(paid_at);
     CREATE INDEX IF NOT EXISTS idx_onchain_imports_wallet_recipient
-      ON onchain_imports(wallet_address, recipient_wallet);
+      ON onchain_imports(wallet_address, network, recipient_wallet);
   `);
 
   cleanSeedRecipients(db);
@@ -387,15 +410,25 @@ function cleanSeedRecipients(db: DatabaseSync) {
 }
 
 function migrateLocalStore(db: DatabaseSync) {
-  const migratedRecipients =
-    tableExists(db, "recipients") && !tableHasColumn(db, "recipients", "owner_wallet");
+  const shouldRebuildRecipients =
+    tableExists(db, "recipients") &&
+    (!tableHasColumn(db, "recipients", "owner_wallet") ||
+      !tableHasColumn(db, "recipients", "network"));
 
-  if (migratedRecipients) {
+  if (shouldRebuildRecipients) {
+    const ownerWalletSelect = tableHasColumn(db, "recipients", "owner_wallet")
+      ? "owner_wallet"
+      : "''";
+    const networkSelect = tableHasColumn(db, "recipients", "network")
+      ? "network"
+      : "'mainnet-beta'";
+
     db.exec(`
       ALTER TABLE recipients RENAME TO recipients_legacy;
 
       CREATE TABLE recipients (
         id TEXT PRIMARY KEY,
+        network TEXT NOT NULL DEFAULT 'mainnet-beta',
         owner_wallet TEXT NOT NULL,
         name TEXT NOT NULL,
         wallet_address TEXT NOT NULL,
@@ -404,15 +437,16 @@ function migrateLocalStore(db: DatabaseSync) {
         trusted_since TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(owner_wallet, wallet_address)
+        UNIQUE(owner_wallet, network, wallet_address)
       );
 
       INSERT OR IGNORE INTO recipients (
-        id, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
+        id, network, owner_wallet, name, wallet_address, category, notes, trusted_since, created_at, updated_at
       )
       SELECT
         id,
-        '',
+        ${networkSelect},
+        ${ownerWalletSelect},
         name,
         wallet_address,
         category,
@@ -428,17 +462,23 @@ function migrateLocalStore(db: DatabaseSync) {
 
   if (
     tableExists(db, "payment_history") &&
-    (migratedRecipients || !tableHasColumn(db, "payment_history", "owner_wallet"))
+    (shouldRebuildRecipients ||
+      !tableHasColumn(db, "payment_history", "owner_wallet") ||
+      !tableHasColumn(db, "payment_history", "network"))
   ) {
     const ownerWalletSelect = tableHasColumn(db, "payment_history", "owner_wallet")
       ? "owner_wallet"
       : "''";
+    const networkSelect = tableHasColumn(db, "payment_history", "network")
+      ? "network"
+      : "'mainnet-beta'";
 
     db.exec(`
       ALTER TABLE payment_history RENAME TO payment_history_legacy;
 
       CREATE TABLE payment_history (
         id TEXT PRIMARY KEY,
+        network TEXT NOT NULL DEFAULT 'mainnet-beta',
         owner_wallet TEXT NOT NULL,
         recipient_id TEXT,
         recipient_name TEXT NOT NULL,
@@ -449,20 +489,22 @@ function migrateLocalStore(db: DatabaseSync) {
         route TEXT NOT NULL,
         verdict TEXT NOT NULL,
         risk_score INTEGER NOT NULL,
-        tx_signature TEXT NOT NULL UNIQUE,
+        tx_signature TEXT NOT NULL,
         source TEXT NOT NULL,
         summary TEXT NOT NULL DEFAULT '',
         paid_at TEXT NOT NULL,
         created_at TEXT NOT NULL,
+        UNIQUE(network, tx_signature),
         FOREIGN KEY (recipient_id) REFERENCES recipients(id) ON DELETE SET NULL
       );
 
       INSERT OR IGNORE INTO payment_history (
-        id, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
+        id, network, owner_wallet, recipient_id, recipient_name, sender_wallet, recipient_wallet, amount, token,
         route, verdict, risk_score, tx_signature, source, summary, paid_at, created_at
       )
       SELECT
         id,
+        ${networkSelect},
         ${ownerWalletSelect},
         recipient_id,
         recipient_name,
@@ -483,6 +525,13 @@ function migrateLocalStore(db: DatabaseSync) {
       DROP TABLE payment_history_legacy;
     `);
   }
+
+  if (tableExists(db, "onchain_imports") && !tableHasColumn(db, "onchain_imports", "network")) {
+    db.exec(`
+      ALTER TABLE onchain_imports
+      ADD COLUMN network TEXT NOT NULL DEFAULT 'mainnet-beta';
+    `);
+  }
 }
 
 function tableExists(db: DatabaseSync, tableName: string) {
@@ -499,11 +548,18 @@ function tableHasColumn(db: DatabaseSync, tableName: string, columnName: string)
   );
 }
 
-function findOrCreateRecipient(ownerWallet: string, name: string, walletAddress: string) {
+function findOrCreateRecipient(
+  ownerWallet: string,
+  network: string,
+  name: string,
+  walletAddress: string
+) {
   const db = getLocalStore();
   const existing = db
-    .prepare("SELECT id FROM recipients WHERE owner_wallet = ? AND wallet_address = ?")
-    .get(ownerWallet, walletAddress) as { id: string } | undefined;
+    .prepare(
+      "SELECT id FROM recipients WHERE owner_wallet = ? AND network = ? AND wallet_address = ?"
+    )
+    .get(ownerWallet, network, walletAddress) as { id: string } | undefined;
 
   if (existing?.id) {
     db.prepare("UPDATE recipients SET name = ?, updated_at = ? WHERE id = ?").run(
@@ -517,6 +573,7 @@ function findOrCreateRecipient(ownerWallet: string, name: string, walletAddress:
   return addRecipient({
     category: "PayGuard",
     name,
+    network,
     ownerWallet,
     walletAddress
   }).id;
@@ -525,6 +582,7 @@ function findOrCreateRecipient(ownerWallet: string, name: string, walletAddress:
 function normalizePaymentHistory(record: Record<string, unknown>): StoredPaymentHistory {
   return {
     id: String(record.id),
+    network: String(record.network),
     ownerWallet: String(record.ownerWallet),
     recipientId: record.recipientId ? String(record.recipientId) : null,
     recipientName: String(record.recipientName),

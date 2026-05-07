@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TrustedSupplier } from "../components/home/trusted-supplier";
-import type { ConnectedWallet, PrefilledRecipient } from "../App";
+import type { ConnectedWallet, PrefilledRecipient, SolanaNetwork } from "../App";
 import solanaLogo from "../../assets/solana.png";
 import usdcLogo from "../../assets/usdc.png";
 import usdtLogo from "../../assets/usdt.png";
@@ -11,25 +11,36 @@ type RecipientSummary = Awaited<
 type WalletBalances = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["getWalletBalances"]>
 >;
+type StoredPaymentHistory = Awaited<
+  ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listPaymentHistory"]>
+>[number];
 
 interface HomePageProps {
   wallet: ConnectedWallet | null;
+  network: SolanaNetwork;
   walletError: string | null;
   onConnectWallet: () => void;
   onDisconnectWallet: () => void;
+  onNetworkChange: (network: SolanaNetwork) => void;
   onStartPayment: (recipient?: PrefilledRecipient) => void;
+  onViewHistory: () => void;
   onViewRecipients: () => void;
 }
 
 export function HomePage({
+  network,
   wallet,
   walletError,
   onConnectWallet,
   onDisconnectWallet,
+  onNetworkChange,
   onStartPayment,
+  onViewHistory,
   onViewRecipients
 }: HomePageProps) {
   const [trustedRecipients, setTrustedRecipients] = useState<RecipientSummary[]>([]);
+  const [recentPayments, setRecentPayments] = useState<StoredPaymentHistory[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingRecipients, setIsLoadingRecipients] = useState(true);
   const [balances, setBalances] = useState<WalletBalances | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
@@ -51,7 +62,10 @@ export function HomePage({
       try {
         setIsLoadingRecipients(true);
         setTrustedRecipients(
-          await window.payguardDesktop!.store.listRecipients(wallet.address)
+          await window.payguardDesktop!.store.listRecipients({
+            network,
+            ownerWallet: wallet.address
+          })
         );
       } finally {
         setIsLoadingRecipients(false);
@@ -59,7 +73,30 @@ export function HomePage({
     }
 
     void loadRecipients();
-  }, [wallet]);
+  }, [wallet, network]);
+
+  useEffect(() => {
+    async function loadRecentPayments() {
+      if (!wallet) {
+        setRecentPayments([]);
+        setIsLoadingHistory(false);
+        return;
+      }
+
+      try {
+        setIsLoadingHistory(true);
+        const history = await window.payguardDesktop!.store.listPaymentHistory(
+          { network, ownerWallet: wallet.address }
+        );
+
+        setRecentPayments(history.slice(0, 3));
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    }
+
+    void loadRecentPayments();
+  }, [wallet?.address, network]);
 
   useEffect(() => {
     let refreshTimeout: number | null = null;
@@ -76,7 +113,10 @@ export function HomePage({
       try {
         setIsLoadingBalances(!balancesRef.current);
         setBalanceError(null);
-        const nextBalances = await window.payguardDesktop!.getWalletBalances(wallet.address);
+        const nextBalances = await window.payguardDesktop!.getWalletBalances({
+          network,
+          walletAddress: wallet.address
+        });
         const refreshDelay = Math.max(
           new Date(nextBalances.expiresAt).getTime() - Date.now() + 500,
           1000
@@ -103,7 +143,7 @@ export function HomePage({
         window.clearTimeout(refreshTimeout);
       }
     };
-  }, [wallet?.address]);
+  }, [wallet?.address, network]);
 
   return (
     <>
@@ -120,6 +160,10 @@ export function HomePage({
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3 max-md:w-full max-md:justify-start">
+              <NetworkSelector
+                network={network}
+                onNetworkChange={onNetworkChange}
+              />
               {wallet ? (
                 <WalletMenu
                   wallet={wallet}
@@ -200,6 +244,43 @@ export function HomePage({
             </div>
           </section>
 
+          <section className="mb-12">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="m-0 text-lg font-extrabold text-[#030813] dark:text-white">
+                Recent Payments
+              </h2>
+              <button
+                className="pg-text-button text-xs"
+                onClick={onViewHistory}
+                type="button"
+              >
+                View all
+              </button>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-[#e0e3e5] bg-white shadow-[0_4px_20px_rgba(26,32,44,0.04)] dark:border-white/10 dark:bg-[#111827]">
+              {!wallet ? (
+                <p className="px-4 py-4 text-sm text-[#45474c] dark:text-slate-400">
+                  Connect wallet to view recent payments.
+                </p>
+              ) : isLoadingHistory ? (
+                <p className="px-4 py-4 text-sm text-[#45474c] dark:text-slate-400">
+                  Loading recent payments...
+                </p>
+              ) : recentPayments.length ? (
+                <div className="divide-y divide-[#e0e3e5] dark:divide-white/10">
+                  {recentPayments.map((payment) => (
+                    <RecentPaymentRow key={payment.id} payment={payment} />
+                  ))}
+                </div>
+              ) : (
+                <p className="px-4 py-4 text-sm text-[#45474c] dark:text-slate-400">
+                  No payments yet.
+                </p>
+              )}
+            </div>
+          </section>
+
           <section>
             <div>
               <h2 className="mb-4 text-lg font-extrabold text-[#030813] dark:text-white">
@@ -240,6 +321,76 @@ export function HomePage({
         </div>
       </main>
     </>
+  );
+}
+
+function RecentPaymentRow({ payment }: { payment: StoredPaymentHistory }) {
+  const isBlocked = payment.verdict === "Block";
+
+  return (
+    <article className="flex items-center justify-between gap-4 px-4 py-3 max-sm:flex-col max-sm:items-start">
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+            isBlocked
+              ? "bg-red-50 text-red-700 dark:bg-red-300/10 dark:text-red-300"
+              : "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+          }`}
+        >
+          <span className="material-symbols-outlined text-[19px]">
+            {isBlocked ? "block" : "arrow_upward"}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-[#181c1e] dark:text-white">
+            {payment.recipientName}
+          </h3>
+          <p className="mt-0.5 text-xs text-[#45474c] dark:text-slate-400">
+            {formatHistoryDate(payment.paidAt)}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3 max-sm:w-full max-sm:justify-between">
+        <span className="font-['Manrope'] text-sm font-bold text-[#181c1e] dark:text-white">
+          {payment.amount} {payment.token}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.05em] ${
+            isBlocked
+              ? "bg-red-50 text-red-700 dark:bg-red-300/10 dark:text-red-300"
+              : "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+          }`}
+        >
+          {payment.verdict}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function NetworkSelector({
+  network,
+  onNetworkChange
+}: {
+  network: SolanaNetwork;
+  onNetworkChange: (network: SolanaNetwork) => void;
+}) {
+  return (
+    <label className="relative">
+      <span className="sr-only">Solana network</span>
+      <select
+        className="h-[42px] appearance-none rounded-lg border border-[#c6c6cc] bg-white py-2 pl-3 pr-9 text-sm font-bold text-[#181c1e] outline-none transition-colors hover:bg-[#f1f4f6] focus:border-[#1a202c] focus:ring-2 focus:ring-[#6cf8bb]/40 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+        onChange={(event) => onNetworkChange(event.target.value as SolanaNetwork)}
+        value={network}
+      >
+        <option value="mainnet-beta">Mainnet</option>
+        <option value="devnet">Devnet</option>
+      </select>
+      <span className="material-symbols-outlined pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[18px] text-[#76777c]">
+        expand_more
+      </span>
+    </label>
   );
 }
 
@@ -308,6 +459,15 @@ function formatTokenAmount(amount: number, symbol: "SOL" | "USDC" | "USDT") {
     maximumFractionDigits,
     minimumFractionDigits: amount > 0 && amount < 1 ? 2 : 0
   })} ${symbol}`;
+}
+
+function formatHistoryDate(date: string) {
+  return new Date(date).toLocaleString(undefined, {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short"
+  });
 }
 
 function WalletMetricCard({

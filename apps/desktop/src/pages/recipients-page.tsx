@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import type { ConnectedWallet, PrefilledRecipient } from "../App";
+import type { ConnectedWallet, PrefilledRecipient, SolanaNetwork } from "../App";
 
 interface RecipientsPageProps {
+  network: SolanaNetwork;
   wallet: ConnectedWallet | null;
   onStartPayment: (recipient?: PrefilledRecipient) => void;
 }
@@ -11,7 +12,11 @@ type RecipientSummary = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
 >[number];
 
-export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) {
+export function RecipientsPage({
+  network,
+  wallet,
+  onStartPayment
+}: RecipientsPageProps) {
   const [recipients, setRecipients] = useState<RecipientSummary[]>([]);
   const [isAddingRecipient, setIsAddingRecipient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,7 +32,12 @@ export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) 
 
     try {
       setIsLoading(true);
-      setRecipients(await window.payguardDesktop!.store.listRecipients(wallet.address));
+      setRecipients(
+        await window.payguardDesktop!.store.listRecipients({
+          network,
+          ownerWallet: wallet.address
+        })
+      );
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load recipients.");
@@ -38,7 +48,7 @@ export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) 
 
   useEffect(() => {
     void loadRecipients();
-  }, [wallet?.address]);
+  }, [wallet?.address, network]);
 
   return (
     <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-8 py-5 dark:bg-[#0f172a] max-lg:px-5">
@@ -134,6 +144,7 @@ export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) 
       {isAddingRecipient ? (
         <AddRecipientModal
           ownerWallet={wallet?.address ?? ""}
+          network={network}
           onClose={() => setIsAddingRecipient(false)}
           onRecipientAdded={async () => {
             setIsAddingRecipient(false);
@@ -147,11 +158,13 @@ export function RecipientsPage({ wallet, onStartPayment }: RecipientsPageProps) 
 }
 
 function AddRecipientModal({
+  network,
   onClose,
   onError,
   onRecipientAdded,
   ownerWallet
 }: {
+  network: SolanaNetwork;
   onClose: () => void;
   onError: (error: string | null) => void;
   onRecipientAdded: () => Promise<void>;
@@ -179,6 +192,7 @@ function AddRecipientModal({
       setIsSaving(true);
       await window.payguardDesktop!.store.addRecipient({
         name: name.trim() || undefined,
+        network,
         ownerWallet,
         walletAddress: walletAddress.trim()
       });

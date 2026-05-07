@@ -6,7 +6,12 @@ import type {
   RecipientRagResult,
   RiskVerdict
 } from "@payguard/qvac-agent";
-import type { ConnectedWallet, PaymentDecision, PrefilledRecipient } from "../App";
+import type {
+  ConnectedWallet,
+  PaymentDecision,
+  PrefilledRecipient,
+  SolanaNetwork
+} from "../App";
 
 type OcrStatus = "idle" | "running" | "complete" | "error";
 type RagStatus = "idle" | "running" | "complete" | "error";
@@ -44,6 +49,7 @@ type RecipientSummary = Awaited<
 >[number];
 
 interface NewPaymentPageProps {
+  network: SolanaNetwork;
   wallet: ConnectedWallet | null;
   prefilledRecipient: PrefilledRecipient | null;
   onAnalyze: (decision: PaymentDecision) => void;
@@ -51,6 +57,7 @@ interface NewPaymentPageProps {
 }
 
 export function NewPaymentPage({
+  network,
   wallet,
   prefilledRecipient,
   onAnalyze,
@@ -279,7 +286,10 @@ export function NewPaymentPage({
       try {
         setIsLoadingRecipients(true);
         const savedRecipients = wallet
-          ? await window.payguardDesktop!.store.listRecipients(wallet.address)
+          ? await window.payguardDesktop!.store.listRecipients({
+              network,
+              ownerWallet: wallet.address
+            })
           : [];
         setRecipients(savedRecipients);
 
@@ -296,7 +306,7 @@ export function NewPaymentPage({
     }
 
     void loadRecipients();
-  }, [prefilledRecipient, wallet?.address]);
+  }, [prefilledRecipient, wallet?.address, network]);
 
   useEffect(() => {
     return () => {
