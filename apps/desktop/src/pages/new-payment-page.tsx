@@ -4,11 +4,11 @@ import type {
   PaymentRagInput,
   QvacOcrResult,
   RecipientRagResult,
-  RiskVerdict
+  TrustedRecipientRecord
 } from "@payguard/qvac-agent";
 import type {
   ConnectedWallet,
-  PaymentDecision,
+  PaymentAnalysisRequest,
   PrefilledRecipient,
   SolanaNetwork
 } from "../App";
@@ -44,6 +44,11 @@ type PaymentDraft = {
   memo: string;
 };
 
+type PaymentValidationErrors = {
+  amount?: string;
+  walletAddress?: string;
+};
+
 type RecipientSummary = Awaited<
   ReturnType<NonNullable<Window["payguardDesktop"]>["store"]["listRecipients"]>
 >[number];
@@ -52,7 +57,7 @@ interface NewPaymentPageProps {
   network: SolanaNetwork;
   wallet: ConnectedWallet | null;
   prefilledRecipient: PrefilledRecipient | null;
-  onAnalyze: (decision: PaymentDecision) => void;
+  onAnalyze: (request: PaymentAnalysisRequest) => void;
   onBack: () => void;
 }
 
@@ -90,28 +95,33 @@ export function NewPaymentPage({
     status: "idle",
     error: null
   });
+  const [hasAttemptedAnalyze, setHasAttemptedAnalyze] = useState(false);
+  const validationErrors = validatePaymentInput(buildPaymentRagInput());
 
-  function buildPaymentRagInput(): PaymentRagInput {
+  function buildPaymentRagInput(
+    ocrResult = ocrState.result,
+    draft = paymentDraft
+  ): PaymentRagInput {
     return {
-      ocrText: ocrState.result?.text,
+      ocrText: ocrResult?.text,
       recipientWallet:
-        paymentDraft.walletAddress ||
-        ocrState.result?.hints.possibleWallets[0] ||
-        ocrState.result?.hints.addressLikeValues[0],
-      amount: paymentDraft.amount || ocrState.result?.hints.amounts[0],
-      token: paymentDraft.token,
-      memo: paymentDraft.memo
+        draft.walletAddress ||
+        ocrResult?.hints.possibleWallets[0] ||
+        ocrResult?.hints.addressLikeValues[0],
+      amount: draft.amount || ocrResult?.hints.amounts[0],
+      token: draft.token,
+      memo: draft.memo
     };
   }
 
-  async function runRecipientMatch(ocrResult: QvacOcrResult, draft: PaymentDraft) {
+  async function runRecipientMatch(ragInput: PaymentRagInput) {
     if (!window.payguardDesktop?.matchRecipientWithRag) {
       setRagState({
         status: "error",
         result: null,
         error: "Desktop QVAC RAG bridge is not available."
       });
-      return;
+      return null;
     }
 
     setRagState({
@@ -120,82 +130,73 @@ export function NewPaymentPage({
       error: null
     });
 
-    const ragInput: PaymentRagInput = {
-      ocrText: ocrResult.text,
-      recipientWallet:
-        draft.walletAddress ||
-        ocrResult.hints.possibleWallets[0] ||
-        ocrResult.hints.addressLikeValues[0],
-      amount: draft.amount || ocrResult.hints.amounts[0],
-      token: draft.token,
-      memo: draft.memo
-    };
-
     try {
-      const result = await window.payguardDesktop.matchRecipientWithRag(ragInput);
+      const result = await window.payguardDesktop.matchRecipientWithRag({
+        ...ragInput,
+        trustedRecipients: buildTrustedRecipientRecords(recipients)
+      });
       setRagState({
         status: "complete",
         result,
         error: null
       });
+      return result;
     } catch (error) {
       setRagState({
         status: "error",
         result: null,
         error: error instanceof Error ? error.message : "QVAC RAG matching failed."
       });
+      return null;
     }
   }
 
   async function handleAnalyzePayment() {
-    if (!window.payguardDesktop?.analyzePaymentRisk) {
+    setHasAttemptedAnalyze(true);
+
+    const currentValidationErrors = validatePaymentInput(buildPaymentRagInput());
+
+    if (Object.keys(currentValidationErrors).length) {
       setRiskState({
         status: "error",
-        error: "Desktop QVAC LLM bridge is not available."
+        error: "Fix the highlighted payment details before running QVAC analysis."
       });
       return;
     }
 
+    if (!window.payguardDesktop?.matchRecipientWithRag || !window.payguardDesktop?.analyzePaymentRisk) {
+      setRiskState({
+        status: "error",
+        error: "Desktop QVAC analysis bridge is not available."
+      });
+      return;
+    }
+
+    const ragInput = buildPaymentRagInput();
+    const savedRecipient = findSavedRecipientByWallet(ragInput.recipientWallet, recipients);
+
     setRiskState({
-      status: "running",
+      status: "idle",
       error: null
     });
+    onAnalyze({
+      ocrRecipientName: inferRecipientNameFromOcr(ocrState.result?.text),
+      ocrText: ocrState.result?.text,
+      payment: ragInput,
+      savedRecipientName: savedRecipient?.name ?? null,
+      trustedRecipients: buildTrustedRecipientRecords(recipients)
+    });
+  }
 
-    try {
-      const verdict = await window.payguardDesktop.analyzePaymentRisk({
-        payment: buildPaymentRagInput(),
-        ocrText: ocrState.result?.text,
-        recipientMatch: ragState.result
-      });
+  function updatePaymentDraft(draft: PaymentDraft) {
+    setPaymentDraft(draft);
 
+    if (riskState.status === "error") {
       setRiskState({
         status: "idle",
         error: null
       });
-      onAnalyze(buildPaymentDecision(verdict));
-    } catch (error) {
-      setRiskState({
-        status: "error",
-        error: error instanceof Error ? error.message : "QVAC LLM analysis failed."
-      });
     }
-  }
-
-  function buildPaymentDecision(verdict: RiskVerdict): PaymentDecision {
-    const ragInput = buildPaymentRagInput();
-
-    return {
-      amount: ragInput.amount || "0.00",
-      token: ragInput.token || "USDC",
-      walletAddress: ragInput.recipientWallet || "Unknown wallet",
-      recipientName:
-        ragState.result?.bestMatch?.recipientName ||
-        inferRecipientNameFromOcr(ocrState.result?.text) ||
-        "Unknown recipient",
-      memo: ragInput.memo || "",
-      selectedRoute: verdict.recommendedRoute,
-      verdict
-    };
   }
 
   async function handleDocumentFile(file: File | null) {
@@ -271,7 +272,7 @@ export function NewPaymentPage({
         result,
         error: null
       });
-      await runRecipientMatch(result, paymentDraft);
+      await runRecipientMatch(buildPaymentRagInput(result, paymentDraft));
     } catch (error) {
       setOcrState({
         status: "error",
@@ -339,11 +340,23 @@ export function NewPaymentPage({
           <div className="col-span-7 flex flex-col gap-3 max-lg:col-span-1">
             <ManualEntryCard
               draft={paymentDraft}
+              errors={hasAttemptedAnalyze ? validationErrors : {}}
               isLoadingRecipients={isLoadingRecipients}
               wallet={wallet}
-              onDraftChange={setPaymentDraft}
+              onDraftChange={updatePaymentDraft}
               recipients={recipients}
             />
+            {!uploadedDocument ? (
+              <PaymentActionPanel
+                buttonLabel="Continue"
+                error={riskState.error}
+                icon="arrow_forward"
+                isRunning={riskState.status === "running"}
+                runningLabel="Checking Payment"
+                validationErrors={hasAttemptedAnalyze ? validationErrors : {}}
+                onSubmit={handleAnalyzePayment}
+              />
+            ) : null}
           </div>
 
           <aside className="col-span-5 flex min-h-full flex-col gap-3 max-lg:col-span-1">
@@ -353,11 +366,17 @@ export function NewPaymentPage({
               ocrState={ocrState}
               ragState={ragState}
             />
-            <AnalyzePanel
-              isAnalyzing={riskState.status === "running"}
-              error={riskState.error}
-              onAnalyze={handleAnalyzePayment}
-            />
+            {uploadedDocument ? (
+              <PaymentActionPanel
+                buttonLabel="Analyze with QVAC"
+                error={riskState.error}
+                icon="analytics"
+                isRunning={riskState.status === "running"}
+                runningLabel="Running Local LLM"
+                validationErrors={hasAttemptedAnalyze ? validationErrors : {}}
+                onSubmit={handleAnalyzePayment}
+              />
+            ) : null}
           </aside>
         </div>
       </div>
@@ -384,8 +403,129 @@ function inferRecipientNameFromOcr(text?: string) {
   return null;
 }
 
+function validatePaymentInput(input: PaymentRagInput): PaymentValidationErrors {
+  const errors: PaymentValidationErrors = {};
+  const walletAddress = input.recipientWallet?.trim() ?? "";
+  const amount = input.amount?.trim() ?? "";
+  const numericAmount = Number(amount);
+
+  if (!walletAddress) {
+    errors.walletAddress = "Enter a recipient Solana wallet address.";
+  } else if (!isValidSolanaPublicKey(walletAddress)) {
+    errors.walletAddress = "Enter a valid Solana wallet address.";
+  }
+
+  if (!amount) {
+    errors.amount = "Enter an amount to pay.";
+  } else if (!Number.isFinite(numericAmount)) {
+    errors.amount = "Enter a valid numeric amount.";
+  } else if (numericAmount <= 0) {
+    errors.amount = "Amount must be greater than zero.";
+  }
+
+  return errors;
+}
+
+function isValidSolanaPublicKey(value: string) {
+  const decoded = decodeBase58(value);
+
+  return decoded !== null && decoded.length === 32;
+}
+
+function decodeBase58(value: string) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const bytes = [0];
+
+  for (const character of value) {
+    const valueIndex = alphabet.indexOf(character);
+
+    if (valueIndex < 0) {
+      return null;
+    }
+
+    let carry = valueIndex;
+
+    for (let index = 0; index < bytes.length; index += 1) {
+      const nextValue = bytes[index] * 58 + carry;
+      bytes[index] = nextValue & 0xff;
+      carry = nextValue >> 8;
+    }
+
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+
+  for (const character of value) {
+    if (character !== "1") {
+      break;
+    }
+
+    bytes.push(0);
+  }
+
+  return bytes.reverse();
+}
+
+function buildTrustedRecipientRecords(
+  recipients: RecipientSummary[]
+): TrustedRecipientRecord[] {
+  return recipients.map((recipient) => ({
+    name: recipient.name || formatWallet(recipient.walletAddress),
+    wallet: recipient.walletAddress,
+    normalToken: extractTokenFromAverage(recipient.averageAmount) || "USDC",
+    normalAmountRange: buildNormalAmountRange(recipient),
+    invoicePattern: recipient.notes || "Manual trusted recipient record",
+    paymentHistory:
+      recipient.payments > 0
+        ? `${recipient.payments} completed PayGuard payment(s); last payment ${recipient.lastPayment}.`
+        : `Saved trusted recipient since ${formatShortDate(recipient.trustedSince)}.`
+  }));
+}
+
+function findSavedRecipientByWallet(
+  walletAddress: string | undefined,
+  recipients: RecipientSummary[]
+) {
+  const wallet = walletAddress?.trim();
+
+  if (!wallet) {
+    return null;
+  }
+
+  return recipients.find((recipient) => recipient.walletAddress === wallet) ?? null;
+}
+
+function buildNormalAmountRange(recipient: RecipientSummary) {
+  const averageAmount = Number.parseFloat(recipient.averageAmount.replace(/,/g, ""));
+  const token = extractTokenFromAverage(recipient.averageAmount) || "USDC";
+
+  if (!Number.isFinite(averageAmount) || averageAmount <= 0) {
+    return `No completed payment history yet; token preference ${token}`;
+  }
+
+  const lower = Math.max(0, averageAmount * 0.5);
+  const upper = averageAmount * 1.5;
+
+  return `${lower.toFixed(2)} to ${upper.toFixed(2)} ${token}`;
+}
+
+function extractTokenFromAverage(averageAmount: string) {
+  return averageAmount.match(/\b(USDC|USDT)\b/)?.[1] ?? null;
+}
+
+function formatShortDate(date: string) {
+  return new Date(date).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
 interface ManualEntryCardProps {
   draft: PaymentDraft;
+  errors: PaymentValidationErrors;
   isLoadingRecipients: boolean;
   wallet: ConnectedWallet | null;
   onDraftChange: (draft: PaymentDraft) => void;
@@ -394,6 +534,7 @@ interface ManualEntryCardProps {
 
 function ManualEntryCard({
   draft,
+  errors,
   isLoadingRecipients,
   wallet,
   onDraftChange,
@@ -466,13 +607,19 @@ function ManualEntryCard({
               account_balance_wallet
             </span>
             <input
-              className="pg-input pl-[60px]"
+              aria-invalid={Boolean(errors.walletAddress)}
+              className={`pg-input w-full !pl-14 !pr-4 ${
+                errors.walletAddress ? "border-rose-300 dark:border-rose-300/50" : ""
+              }`}
               onChange={(event) => updateWalletAddress(event.target.value)}
-              placeholder="0x..."
+              placeholder="Solana wallet address"
               type="text"
               value={draft.walletAddress}
             />
           </span>
+          {errors.walletAddress ? (
+            <FieldError>{errors.walletAddress}</FieldError>
+          ) : null}
         </label>
 
         <div className="grid grid-cols-3 gap-3 max-sm:grid-cols-1">
@@ -483,15 +630,21 @@ function ManualEntryCard({
                 $
               </span>
               <input
-                className="pg-input pl-[56px]"
+                aria-invalid={Boolean(errors.amount)}
+                className={`pg-input w-full !pl-10 !pr-4 ${
+                  errors.amount ? "border-rose-300 dark:border-rose-300/50" : ""
+                }`}
+                min="0"
                 onChange={(event) =>
                   onDraftChange({ ...draft, amount: event.target.value })
                 }
                 placeholder="0.00"
+                step="any"
                 type="number"
                 value={draft.amount}
               />
             </span>
+            {errors.amount ? <FieldError>{errors.amount}</FieldError> : null}
           </label>
 
           <label className="grid gap-2">
@@ -534,6 +687,15 @@ function formatWallet(walletAddress: string) {
   }
 
   return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
+}
+
+function FieldError({ children }: { children: string }) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs font-semibold leading-5 text-[#9f1239] dark:text-rose-300">
+      <span className="material-symbols-outlined text-sm">error</span>
+      {children}
+    </span>
+  );
 }
 
 interface UploadCardProps {
@@ -895,34 +1057,58 @@ function HintGroup({ label, values }: { label: string; values: string[] }) {
   );
 }
 
-interface AnalyzePanelProps {
+interface PaymentActionPanelProps {
+  buttonLabel: string;
   error: string | null;
-  isAnalyzing: boolean;
-  onAnalyze: () => void;
+  icon: string;
+  isRunning: boolean;
+  onSubmit: () => void;
+  runningLabel: string;
+  validationErrors: PaymentValidationErrors;
 }
 
-function AnalyzePanel({ error, isAnalyzing, onAnalyze }: AnalyzePanelProps) {
+function PaymentActionPanel({
+  buttonLabel,
+  error,
+  icon,
+  isRunning,
+  onSubmit,
+  runningLabel,
+  validationErrors
+}: PaymentActionPanelProps) {
+  const validationMessages = Object.values(validationErrors);
+
   return (
     <div className="mt-auto flex flex-col gap-2 pt-1">
       <button
         className="group flex w-full items-center justify-center gap-3 rounded-xl bg-[#1a202c] px-6 py-3 font-['Manrope'] text-base font-bold text-white shadow-lg shadow-[#1a202c]/20 transition-colors hover:bg-[#030813] disabled:cursor-not-allowed disabled:opacity-70 dark:bg-[#6ffbbe] dark:text-[#002113] dark:shadow-[#6ffbbe]/10 dark:hover:bg-[#4edea3]"
-        disabled={isAnalyzing}
-        onClick={onAnalyze}
+        disabled={isRunning}
+        onClick={onSubmit}
         type="button"
       >
         <span
           className={`material-symbols-outlined ${
-            isAnalyzing ? "pg-spinner" : "transition-transform group-hover:rotate-12"
+            isRunning ? "pg-spinner" : "transition-transform group-hover:rotate-12"
           }`}
         >
-          {isAnalyzing ? "progress_activity" : "analytics"}
+          {isRunning ? "progress_activity" : icon}
         </span>
-        {isAnalyzing ? "Running Local LLM" : "Analyze with QVAC"}
+        {isRunning ? runningLabel : buttonLabel}
       </button>
       {error ? (
         <p className="text-center text-xs leading-5 text-[#9f1239] dark:text-rose-300">
           {error}
         </p>
+      ) : null}
+      {validationMessages.length ? (
+        <ul className="m-0 grid gap-1 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs leading-5 text-[#9f1239] dark:border-rose-300/15 dark:bg-rose-300/10 dark:text-rose-300">
+          {validationMessages.map((message) => (
+            <li className="flex items-start gap-2" key={message}>
+              <span className="material-symbols-outlined mt-0.5 text-sm">error</span>
+              <span>{message}</span>
+            </li>
+          ))}
+        </ul>
       ) : null}
       <p className="flex items-center justify-center gap-2 text-center text-xs text-[#45474c] dark:text-slate-400">
         <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">

@@ -7,6 +7,7 @@ import {
   analyzePaymentRiskWithLlm,
   matchPaymentRecipientWithRag,
   type PaymentRagInput,
+  type PaymentRagRequest,
   type RiskAnalysisInput
 } from "@payguard/qvac-agent";
 import {
@@ -118,11 +119,13 @@ function registerQvacHandlers() {
   });
 
   ipcMain.handle("qvac:match-recipient-rag", async (_event, input: unknown) => {
-    if (!isPaymentRagInput(input)) {
+    if (!isPaymentRagRequest(input)) {
       throw new Error("Valid payment context is required for QVAC RAG matching.");
     }
 
-    return matchPaymentRecipientWithRag(input);
+    const { trustedRecipients, ...paymentInput } = input;
+
+    return matchPaymentRecipientWithRag(paymentInput, trustedRecipients);
   });
 
   ipcMain.handle("qvac:analyze-payment-risk", async (_event, input: unknown) => {
@@ -416,6 +419,36 @@ function isPaymentRagInput(input: unknown): input is PaymentRagInput {
     const value = (input as Record<string, unknown>)[key];
     return value === undefined || typeof value === "string";
   });
+}
+
+function isPaymentRagRequest(input: unknown): input is PaymentRagRequest {
+  if (!isPaymentRagInput(input)) {
+    return false;
+  }
+
+  const trustedRecipients = (input as Record<string, unknown>).trustedRecipients;
+
+  return (
+    trustedRecipients === undefined ||
+    (Array.isArray(trustedRecipients) && trustedRecipients.every(isTrustedRecipientRecord))
+  );
+}
+
+function isTrustedRecipientRecord(input: unknown) {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+
+  return (
+    typeof candidate.name === "string" &&
+    typeof candidate.wallet === "string" &&
+    typeof candidate.normalToken === "string" &&
+    typeof candidate.normalAmountRange === "string" &&
+    typeof candidate.invoicePattern === "string" &&
+    typeof candidate.paymentHistory === "string"
+  );
 }
 
 function isRiskAnalysisInput(input: unknown): input is RiskAnalysisInput {

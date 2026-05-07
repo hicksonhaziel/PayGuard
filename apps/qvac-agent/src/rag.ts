@@ -18,6 +18,10 @@ export type PaymentRagInput = {
   memo?: string;
 };
 
+export type PaymentRagRequest = PaymentRagInput & {
+  trustedRecipients?: TrustedRecipientRecord[];
+};
+
 export type TrustedRecipientRecord = {
   name: string;
   wallet: string;
@@ -72,6 +76,16 @@ export async function matchPaymentRecipientWithRag(
   input: PaymentRagInput,
   trustedRecipients = defaultTrustedRecipients
 ): Promise<RecipientRagResult> {
+  if (!trustedRecipients.length) {
+    return {
+      query: formatPaymentQuery(input),
+      bestMatch: null,
+      matches: [],
+      recommendation: "no-match",
+      reasons: ["No local trusted recipient records are available yet."]
+    };
+  }
+
   const workspace = `payguard-recipient-rag-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2)}`;
@@ -111,17 +125,28 @@ export async function matchPaymentRecipientWithRag(
       topK: 3
     });
 
-    const matches = results.map((result: QvacRagSearchResult) => ({
+    const matches: RecipientRagMatch[] = results.map((result: QvacRagSearchResult) => ({
       score: result.score,
       content: result.content,
       recipientName: extractRecipientName(result.content)
     }));
+    const exactWalletMatch = findExactWalletMatch(trustedRecipients, input.recipientWallet);
+    const rankedMatches: RecipientRagMatch[] = exactWalletMatch
+      ? [
+          {
+            score: 1,
+            content: formatTrustedRecipient(exactWalletMatch),
+            recipientName: exactWalletMatch.name
+          },
+          ...matches.filter((match) => !match.content.includes(exactWalletMatch.wallet))
+        ]
+      : matches;
 
     return {
       query,
-      bestMatch: matches[0] ?? null,
-      matches,
-      ...classifyMatches(matches, input)
+      bestMatch: rankedMatches[0] ?? null,
+      matches: rankedMatches,
+      ...classifyMatches(rankedMatches, input)
     };
   } finally {
     await ragCloseWorkspace({ workspace, deleteOnClose: true }).catch(() => {});
@@ -132,6 +157,19 @@ export async function matchPaymentRecipientWithRag(
 
     await close();
   }
+}
+
+function findExactWalletMatch(
+  recipients: TrustedRecipientRecord[],
+  walletAddress?: string
+) {
+  const wallet = walletAddress?.trim();
+
+  if (!wallet) {
+    return null;
+  }
+
+  return recipients.find((recipient) => recipient.wallet === wallet) ?? null;
 }
 
 function formatTrustedRecipient(recipient: TrustedRecipientRecord) {

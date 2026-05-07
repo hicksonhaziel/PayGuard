@@ -8,6 +8,7 @@ export {
 export {
   matchPaymentRecipientWithRag,
   type PaymentRagInput,
+  type PaymentRagRequest,
   type RecipientRagMatch,
   type RecipientRagResult,
   type TrustedRecipientRecord

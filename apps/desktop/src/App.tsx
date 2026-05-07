@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import type { RiskVerdict } from "@payguard/qvac-agent";
+import type {
+  PaymentRagInput,
+  RecipientRagResult,
+  RiskVerdict,
+  TrustedRecipientRecord
+} from "@payguard/qvac-agent";
 import { TopNavigation } from "./components/layout/top-navigation";
 import { AnalyzeStatePage } from "./pages/analyze-state-page";
 import { ConfirmPage } from "./pages/confirm-page";
@@ -39,6 +44,13 @@ export type PaymentDecision = {
   selectedRoute: "Direct Send" | "Guarded Payment" | "Block";
   verdict: RiskVerdict;
 };
+export type PaymentAnalysisRequest = {
+  ocrRecipientName: string | null;
+  ocrText?: string;
+  payment: PaymentRagInput;
+  savedRecipientName: string | null;
+  trustedRecipients: TrustedRecipientRecord[];
+};
 
 const screenOrder: Record<AppScreen, number> = {
   home: 0,
@@ -58,6 +70,7 @@ export default function App() {
   const [visibleScreen, setVisibleScreen] = useState<AppScreen>("home");
   const [paymentDecision, setPaymentDecision] =
     useState<PaymentDecision | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [prefilledRecipient, setPrefilledRecipient] =
     useState<PrefilledRecipient | null>(null);
   const [connectedWallet, setConnectedWallet] =
@@ -119,9 +132,40 @@ export default function App() {
     setActiveScreen("new-payment");
   }
 
-  function completeRiskAnalysis(decision: PaymentDecision) {
-    setPaymentDecision(decision);
+  function startRiskAnalysis(request: PaymentAnalysisRequest) {
+    setPaymentDecision(null);
+    setAnalysisError(null);
     navigateTo("analyzing");
+    void runRiskAnalysis(request);
+  }
+
+  async function runRiskAnalysis(request: PaymentAnalysisRequest) {
+    try {
+      if (!window.payguardDesktop?.matchRecipientWithRag) {
+        throw new Error("Desktop QVAC RAG bridge is not available.");
+      }
+
+      if (!window.payguardDesktop?.analyzePaymentRisk) {
+        throw new Error("Desktop QVAC LLM bridge is not available.");
+      }
+
+      const recipientMatch = await window.payguardDesktop.matchRecipientWithRag({
+        ...request.payment,
+        trustedRecipients: request.trustedRecipients
+      });
+      const verdict = await window.payguardDesktop.analyzePaymentRisk({
+        payment: request.payment,
+        ocrText: request.ocrText,
+        recipientMatch
+      });
+
+      setPaymentDecision(buildPaymentDecision(request, recipientMatch, verdict));
+      navigateTo("confirm");
+    } catch (error) {
+      setAnalysisError(
+        error instanceof Error ? error.message : "QVAC payment analysis failed."
+      );
+    }
   }
 
   function completeDirectSend() {
@@ -253,7 +297,10 @@ export default function App() {
             onStartPayment={startNewPayment}
           />
         ) : visibleScreen === "analyzing" ? (
-          <AnalyzeStatePage onComplete={() => navigateTo("confirm")} />
+          <AnalyzeStatePage
+            error={analysisError}
+            onBack={() => navigateTo("new-payment")}
+          />
         ) : visibleScreen === "confirm" ? (
           <ConfirmPage
             decision={paymentDecision}
@@ -280,12 +327,32 @@ export default function App() {
             wallet={connectedWallet}
             prefilledRecipient={prefilledRecipient}
             onBack={() => navigateTo("home")}
-            onAnalyze={completeRiskAnalysis}
+            onAnalyze={startRiskAnalysis}
           />
         )}
       </div>
     </div>
   );
+}
+
+function buildPaymentDecision(
+  request: PaymentAnalysisRequest,
+  recipientMatch: RecipientRagResult | null,
+  verdict: RiskVerdict
+): PaymentDecision {
+  return {
+    amount: request.payment.amount || "0.00",
+    token: request.payment.token || "USDC",
+    walletAddress: request.payment.recipientWallet || "Unknown wallet",
+    recipientName:
+      request.savedRecipientName ||
+      recipientMatch?.bestMatch?.recipientName ||
+      request.ocrRecipientName ||
+      "Unknown recipient",
+    memo: request.payment.memo || "",
+    selectedRoute: verdict.recommendedRoute,
+    verdict
+  };
 }
 
 function loadStoredNetwork(): SolanaNetwork {

@@ -1,7 +1,6 @@
-import { useEffect } from "react";
-
 interface AnalyzeStatePageProps {
-  onComplete: () => void;
+  error: string | null;
+  onBack: () => void;
 }
 
 const analysisSteps = [
@@ -23,13 +22,7 @@ const analysisSteps = [
   }
 ] as const;
 
-export function AnalyzeStatePage({ onComplete }: AnalyzeStatePageProps) {
-  useEffect(() => {
-    const timeout = window.setTimeout(onComplete, 3000);
-
-    return () => window.clearTimeout(timeout);
-  }, [onComplete]);
-
+export function AnalyzeStatePage({ error, onBack }: AnalyzeStatePageProps) {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[#f7fafc] px-6 py-10 dark:bg-[#0f172a]">
       <section className="flex w-full max-w-xl flex-col items-center">
@@ -54,13 +47,13 @@ export function AnalyzeStatePage({ onComplete }: AnalyzeStatePageProps) {
             {analysisSteps.map((step) => (
               <li
                 className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-colors ${
-                  step.state === "active"
+                  step.state === "active" && !error
                     ? "border border-[#e0e3e5] bg-[#f1f4f6] dark:border-white/10 dark:bg-white/[0.05]"
                     : "hover:bg-[#f1f4f6] dark:hover:bg-white/[0.04]"
                 }`}
                 key={step.label}
               >
-                {step.state === "active" ? (
+                {step.state === "active" && !error ? (
                   <span className="h-7 w-7 shrink-0 rounded-full border-2 border-[#006c49]/30 border-t-[#006c49] pg-spinner dark:border-[#6ffbbe]/30 dark:border-t-[#6ffbbe]" />
                 ) : (
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#006c49]/10">
@@ -83,6 +76,20 @@ export function AnalyzeStatePage({ onComplete }: AnalyzeStatePageProps) {
             ))}
           </ul>
         </div>
+        {error ? (
+          <div className="mt-4 w-full rounded-2xl border border-rose-100 bg-rose-50 p-4 text-center dark:border-rose-300/15 dark:bg-rose-300/10">
+            <p className="text-sm font-semibold leading-6 text-[#9f1239] dark:text-rose-300">
+              {error}
+            </p>
+            <button
+              className="mt-3 rounded-xl border-2 border-[#030813] bg-transparent px-5 py-2 text-sm font-semibold text-[#030813] transition-colors hover:bg-[#ebeef0] dark:border-white dark:text-white dark:hover:bg-white/10"
+              onClick={onBack}
+              type="button"
+            >
+              Back to payment
+            </button>
+          </div>
+        ) : null}
       </section>
     </main>
   );

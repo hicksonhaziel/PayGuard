@@ -1,5 +1,6 @@
 import type {
   PaymentRagInput,
+  PaymentRagRequest,
   QvacOcrResult,
   RecipientRagResult,
   RiskAnalysisInput,
@@ -93,7 +94,7 @@ declare global {
         expiresAt: string;
         isStale: boolean;
       }>;
-      matchRecipientWithRag: (input: PaymentRagInput) => Promise<RecipientRagResult>;
+      matchRecipientWithRag: (input: PaymentRagRequest) => Promise<RecipientRagResult>;
       onExternalWalletConnected: (
         callback: (wallet: {
           address: string;
