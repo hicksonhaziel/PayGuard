@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PaymentDecision } from "../App";
 import type { ConnectedWallet, SolanaNetwork } from "../App";
 
@@ -17,6 +17,8 @@ export function SuccessPage({
 }: SuccessPageProps) {
   const displayDecision = decision ?? createFallbackDecision();
   const savedReceiptRef = useRef(false);
+  const [guardedActionError, setGuardedActionError] = useState<string | null>(null);
+  const [guardedActionSignature, setGuardedActionSignature] = useState<string | null>(null);
   const receiptDetails = [
     {
       label: "Security Verdict",
@@ -36,8 +38,15 @@ export function SuccessPage({
       ? [
           {
             label: "Claim Window",
-            value: `${displayDecision.guardedHoldHours} hours`,
+            value: displayDecision.unlockAt
+              ? formatUnlockDate(displayDecision.unlockAt)
+              : `${displayDecision.guardedHoldHours} hours`,
             tag: "Hold"
+          },
+          {
+            label: "Escrow",
+            value: displayDecision.escrowAddress ?? "Pending escrow",
+            mono: true
           }
         ]
       : []),
@@ -69,6 +78,43 @@ export function SuccessPage({
       verdict: decision.verdict.verdict
     });
   }, [decision, network, wallet?.address]);
+
+  async function runGuardedAction(action: "cancel" | "claim") {
+    if (
+      !decision ||
+      !wallet ||
+      !decision.escrowAddress ||
+      !decision.vaultAddress ||
+      (decision.token !== "USDC" && decision.token !== "USDT")
+    ) {
+      setGuardedActionError("Guarded payment details are missing.");
+      return;
+    }
+
+    try {
+      setGuardedActionError(null);
+      const input = {
+        amount: decision.amount,
+        escrowAddress: decision.escrowAddress,
+        network,
+        recipientWallet: decision.walletAddress,
+        senderWallet: wallet.address,
+        token: decision.token,
+        vaultAddress: decision.vaultAddress,
+        walletProvider: wallet.provider
+      } as const;
+      const result =
+        action === "cancel"
+          ? await window.payguardDesktop!.startGuardedCancel(input)
+          : await window.payguardDesktop!.startGuardedClaim(input);
+
+      setGuardedActionSignature(result.signature);
+    } catch (error) {
+      setGuardedActionError(
+        error instanceof Error ? error.message : `Guarded ${action} failed.`
+      );
+    }
+  }
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] px-6 py-5 dark:bg-[#0f172a]">
@@ -135,6 +181,18 @@ export function SuccessPage({
         </article>
 
         <section className="mt-1 flex w-full flex-wrap items-center justify-center gap-2.5">
+          {displayDecision.selectedRoute === "Guarded Payment" &&
+          displayDecision.escrowAddress &&
+          displayDecision.vaultAddress ? (
+            <GuardedReceiptActions
+              actionError={guardedActionError}
+              actionSignature={guardedActionSignature}
+              decision={displayDecision}
+              wallet={wallet}
+              onCancel={() => runGuardedAction("cancel")}
+              onClaim={() => runGuardedAction("claim")}
+            />
+          ) : null}
           <button
             className="flex items-center justify-center gap-2 rounded-xl bg-[#006c49] px-5 py-2 text-sm font-semibold text-white shadow-md transition-colors hover:bg-[#005236] dark:bg-[#6ffbbe] dark:text-[#002113] dark:hover:bg-[#4edea3]"
             onClick={onNewPayment}
@@ -155,6 +213,63 @@ export function SuccessPage({
         </button>
       </section>
     </main>
+  );
+}
+
+function GuardedReceiptActions({
+  actionError,
+  actionSignature,
+  decision,
+  wallet,
+  onCancel,
+  onClaim
+}: {
+  actionError: string | null;
+  actionSignature: string | null;
+  decision: PaymentDecision;
+  wallet: ConnectedWallet | null;
+  onCancel: () => void;
+  onClaim: () => void;
+}) {
+  const unlockTime = decision.unlockAt ? new Date(decision.unlockAt).getTime() : 0;
+  const isUnlocked = unlockTime > 0 && Date.now() >= unlockTime;
+  const canCancel = Boolean(wallet) && !isUnlocked;
+  const canClaim = isUnlocked;
+
+  return (
+    <div className="mb-1 grid w-full gap-2 rounded-2xl border border-[#e0e3e5] bg-white p-3 text-center dark:border-white/10 dark:bg-[#111827]">
+      <p className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
+        Escrow: <span className="font-mono">{formatWallet(decision.escrowAddress ?? "")}</span>
+      </p>
+      <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
+        <button
+          className="rounded-xl border-2 border-[#030813] bg-transparent px-4 py-2 text-sm font-semibold text-[#030813] transition-colors hover:bg-[#ebeef0] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white dark:text-white dark:hover:bg-white/10"
+          disabled={!canCancel}
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel hold
+        </button>
+        <button
+          className="rounded-xl bg-[#030813] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#6ffbbe] dark:text-[#002113]"
+          disabled={!canClaim}
+          onClick={onClaim}
+          type="button"
+        >
+          Claim funds
+        </button>
+      </div>
+      {actionSignature ? (
+        <p className="text-xs font-semibold text-[#006c49] dark:text-[#6ffbbe]">
+          Action submitted: {formatSignature(actionSignature)}
+        </p>
+      ) : null}
+      {actionError ? (
+        <p className="text-xs font-semibold text-[#9f1239] dark:text-rose-300">
+          {actionError}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -226,7 +341,10 @@ function createFallbackDecision(): PaymentDecision {
     memo: "",
     guardedHoldHours: 24,
     selectedRoute: "Guarded Payment",
+    escrowAddress: undefined,
     txSignature: undefined,
+    unlockAt: undefined,
+    vaultAddress: undefined,
     verdict: {
       verdict: "Review",
       riskScore: 50,
@@ -251,4 +369,13 @@ function formatSignature(signature: string) {
   }
 
   return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
+}
+
+function formatUnlockDate(date: string) {
+  return new Date(date).toLocaleString(undefined, {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short"
+  });
 }

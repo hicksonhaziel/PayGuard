@@ -188,7 +188,7 @@ function GuardedHoldSettings({
   const unlockDate = new Date(Date.now() + hours * 60 * 60 * 1000);
 
   function updateHours(value: string) {
-    const nextHours = Math.max(1, Math.min(168, Math.round(Number(value) || 1)));
+    const nextHours = Math.max(0.02, Math.min(168, Number(value) || 0.02));
     onHoursChange(nextHours);
   }
 
@@ -221,8 +221,9 @@ function GuardedHoldSettings({
           <input
             className="h-2 w-full accent-[#006c49] dark:accent-[#6ffbbe]"
             max="168"
-            min="1"
+            min="0.02"
             onChange={(event) => updateHours(event.target.value)}
+            step="0.01"
             type="range"
             value={hours}
           />
@@ -230,8 +231,9 @@ function GuardedHoldSettings({
             <input
               className="pg-input w-full !pr-12 text-right"
               max="168"
-              min="1"
+              min="0.02"
               onChange={(event) => updateHours(event.target.value)}
+              step="0.01"
               type="number"
               value={hours}
             />
@@ -382,9 +384,12 @@ function createFallbackDecision(): PaymentDecision {
     walletAddress: "Unknown wallet",
     recipientName: "Unknown recipient",
     memo: "",
+    escrowAddress: undefined,
     guardedHoldHours: 24,
     selectedRoute: "Guarded Payment",
     txSignature: undefined,
+    unlockAt: undefined,
+    vaultAddress: undefined,
     verdict: {
       verdict: "Review",
       riskScore: 50,

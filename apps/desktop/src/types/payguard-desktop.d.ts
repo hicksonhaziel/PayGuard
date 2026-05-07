@@ -59,6 +59,21 @@ type StoredOnchainImport = {
   error: string | null;
 };
 
+type GuardedPaymentRecord = {
+  amount: string;
+  createdAt: string;
+  escrowAddress: string;
+  mintAddress: string;
+  network: "mainnet-beta" | "devnet";
+  recipientWallet: string;
+  role: "sender" | "recipient";
+  senderWallet: string;
+  status: "funded" | "cancelled" | "claimed" | "unknown";
+  token: "USDC" | "USDT";
+  unlockAt: string;
+  vaultAddress: string;
+};
+
 declare global {
   type InjectedSolanaProvider = {
     isPhantom?: boolean;
@@ -108,7 +123,46 @@ declare global {
         recipientWallet: string;
         senderWallet: string;
         token: "USDC" | "USDT";
+        walletProvider?: "phantom" | "solflare" | "injected";
       }) => Promise<{ signature: string }>;
+      startGuardedPayment: (input: {
+        amount: string;
+        guardedHoldHours: number;
+        network: "mainnet-beta" | "devnet";
+        recipientWallet: string;
+        senderWallet: string;
+        token: "USDC" | "USDT";
+        walletProvider?: "phantom" | "solflare" | "injected";
+      }) => Promise<{
+        escrowAddress: string;
+        signature: string;
+        unlockAt: string;
+        vaultAddress: string;
+      }>;
+      startGuardedCancel: (input: {
+        amount: string;
+        escrowAddress: string;
+        network: "mainnet-beta" | "devnet";
+        recipientWallet: string;
+        senderWallet: string;
+        token: "USDC" | "USDT";
+        vaultAddress: string;
+        walletProvider?: "phantom" | "solflare" | "injected";
+      }) => Promise<{ signature: string }>;
+      startGuardedClaim: (input: {
+        amount: string;
+        escrowAddress: string;
+        network: "mainnet-beta" | "devnet";
+        recipientWallet: string;
+        senderWallet: string;
+        token: "USDC" | "USDT";
+        vaultAddress: string;
+        walletProvider?: "phantom" | "solflare" | "injected";
+      }) => Promise<{ signature: string }>;
+      listGuardedPayments: (input: {
+        network: "mainnet-beta" | "devnet";
+        walletAddress: string;
+      }) => Promise<GuardedPaymentRecord[]>;
       startExternalWalletConnect: () => Promise<{ url: string }>;
       store: {
         addPaymentHistory: (

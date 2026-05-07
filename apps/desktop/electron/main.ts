@@ -1,10 +1,18 @@
 import path from "node:path";
 import http from "node:http";
 import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
 import { readFileSync } from "node:fs";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import {
+  Connection,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction
+} from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
   getAssociatedTokenAddressSync
@@ -29,6 +37,8 @@ import {
 const devServerUrl = "http://127.0.0.1:5174";
 const appIconPath = path.join(__dirname, "../assets/icon.png");
 const supportedOcrExtensions = new Set([".png", ".jpg", ".jpeg"]);
+const walletBridgeHost = "127.0.0.1";
+const preferredWalletBridgePort = Number(process.env.PAYGUARD_WALLET_BRIDGE_PORT ?? 49152);
 type SolanaNetwork = "mainnet-beta" | "devnet";
 type DirectSendInput = {
   amount: string;
@@ -36,6 +46,47 @@ type DirectSendInput = {
   recipientWallet: string;
   senderWallet: string;
   token: "USDC" | "USDT";
+  walletProvider?: WalletProvider;
+};
+type WalletProvider = "phantom" | "solflare" | "injected";
+type GuardedPaymentInput = DirectSendInput & {
+  guardedHoldHours: number;
+};
+type GuardedActionInput = {
+  amount: string;
+  escrowAddress: string;
+  mintAddress?: string;
+  network: SolanaNetwork;
+  recipientWallet: string;
+  senderWallet: string;
+  token: "USDC" | "USDT";
+  vaultAddress: string;
+  walletProvider?: WalletProvider;
+};
+type GuardedPaymentRecord = {
+  amount: string;
+  createdAt: string;
+  escrowAddress: string;
+  mintAddress: string;
+  network: SolanaNetwork;
+  recipientWallet: string;
+  role: "sender" | "recipient";
+  senderWallet: string;
+  status: "funded" | "cancelled" | "claimed" | "unknown";
+  token: "USDC" | "USDT";
+  unlockAt: string;
+  vaultAddress: string;
+};
+type DecodedEscrowState = {
+  amount: bigint;
+  createdAt: number;
+  escrowAddress: PublicKey;
+  mint: PublicKey;
+  recipient: PublicKey;
+  sender: PublicKey;
+  status: GuardedPaymentRecord["status"];
+  unlockAt: number;
+  vault: PublicKey;
 };
 
 const solanaRpcUrls: Record<SolanaNetwork, string> = {
@@ -61,6 +112,9 @@ const stablecoinMints: Record<
   }
 };
 const balanceCacheTtlMs = Number(process.env.PAYGUARD_BALANCE_CACHE_SECONDS ?? 60) * 1000;
+const payguardEscrowProgramId = new PublicKey(
+  process.env.PAYGUARD_ESCROW_PROGRAM_ID ?? "CzQ6EYC8PBwLC5QsrAcrjeEQKJzbcLWZfTta7Qi8MZKZ"
+);
 let walletBridgeServer: http.Server | null = null;
 let walletBridgeTimeout: NodeJS.Timeout | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -198,6 +252,65 @@ function registerWalletHandlers() {
     }
 
     return startExternalDirectSendBridge(window, input);
+  });
+
+  ipcMain.handle("wallet:guarded-payment", async (event, input: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window) {
+      throw new Error("Could not find the PayGuard window for guarded payment signing.");
+    }
+
+    if (!isGuardedPaymentInput(input)) {
+      throw new Error("Valid guarded payment details are required.");
+    }
+
+    return startExternalGuardedPaymentBridge(window, input);
+  });
+
+  ipcMain.handle("wallet:guarded-cancel", async (event, input: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window) {
+      throw new Error("Could not find the PayGuard window for guarded cancellation.");
+    }
+
+    if (!isGuardedActionInput(input)) {
+      throw new Error("Valid guarded cancellation details are required.");
+    }
+
+    return startExternalGuardedActionBridge(window, input, "cancel");
+  });
+
+  ipcMain.handle("wallet:guarded-claim", async (event, input: unknown) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window) {
+      throw new Error("Could not find the PayGuard window for guarded claim.");
+    }
+
+    if (!isGuardedActionInput(input)) {
+      throw new Error("Valid guarded claim details are required.");
+    }
+
+    return startExternalGuardedActionBridge(window, input, "claim");
+  });
+
+  ipcMain.handle("wallet:list-guarded-payments", async (_event, input: unknown) => {
+    const walletAddress =
+      input && typeof input === "object"
+        ? (input as Record<string, unknown>).walletAddress
+        : null;
+    const network =
+      input && typeof input === "object"
+        ? assertNetwork((input as Record<string, unknown>).network)
+        : "devnet";
+
+    if (typeof walletAddress !== "string" || !walletAddress.trim()) {
+      throw new Error("A connected wallet address is required.");
+    }
+
+    return listGuardedPayments(walletAddress.trim(), network);
   });
 }
 
@@ -460,6 +573,8 @@ function isDirectSendInput(input: unknown): input is DirectSendInput {
 
   const candidate = input as Record<string, unknown>;
 
+  const walletProvider = candidate.walletProvider;
+
   return (
     typeof candidate.amount === "string" &&
     Number(candidate.amount) > 0 &&
@@ -468,7 +583,41 @@ function isDirectSendInput(input: unknown): input is DirectSendInput {
     candidate.recipientWallet.trim().length > 0 &&
     typeof candidate.senderWallet === "string" &&
     candidate.senderWallet.trim().length > 0 &&
-    (candidate.token === "USDC" || candidate.token === "USDT")
+    (candidate.token === "USDC" || candidate.token === "USDT") &&
+    (walletProvider === undefined ||
+      walletProvider === "phantom" ||
+      walletProvider === "solflare" ||
+      walletProvider === "injected")
+  );
+}
+
+function isGuardedPaymentInput(input: unknown): input is GuardedPaymentInput {
+  if (!isDirectSendInput(input)) {
+    return false;
+  }
+
+  const guardedHoldHours = (input as Record<string, unknown>).guardedHoldHours;
+
+  return (
+    typeof guardedHoldHours === "number" &&
+    Number.isFinite(guardedHoldHours) &&
+    guardedHoldHours >= 0.02 &&
+    guardedHoldHours <= 168
+  );
+}
+
+function isGuardedActionInput(input: unknown): input is GuardedActionInput {
+  if (!isDirectSendInput(input)) {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+
+  return (
+    typeof candidate.escrowAddress === "string" &&
+    candidate.escrowAddress.trim().length > 0 &&
+    typeof candidate.vaultAddress === "string" &&
+    candidate.vaultAddress.trim().length > 0
   );
 }
 
@@ -635,25 +784,16 @@ async function startExternalWalletBridge(window: BrowserWindow) {
     response.end("Not found");
   });
 
-  const port = await new Promise<number>((resolve, reject) => {
-    walletBridgeServer?.once("error", reject);
-    walletBridgeServer?.listen(0, "127.0.0.1", () => {
-      const address = walletBridgeServer?.address();
-
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not allocate a local wallet bridge port."));
-        return;
-      }
-
-      resolve(address.port);
-    });
-  });
+  const port = await listenWalletBridgeServer(
+    walletBridgeServer,
+    "Could not allocate a local wallet bridge port."
+  );
 
   walletBridgeTimeout = setTimeout(() => {
     void closeWalletBridge();
   }, 120000);
 
-  return `http://127.0.0.1:${port}/connect`;
+  return buildWalletBridgeUrl(port, "/connect");
 }
 
 async function closeWalletBridge() {
@@ -672,6 +812,47 @@ async function closeWalletBridge() {
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
   });
+}
+
+function listenWalletBridgeServer(server: http.Server, addressErrorMessage: string) {
+  return new Promise<number>((resolve, reject) => {
+    let didFallback = false;
+
+    function listen(port: number) {
+      const handleError = (error: NodeJS.ErrnoException) => {
+        server.off("listening", handleListening);
+
+        if (!didFallback && error.code === "EADDRINUSE") {
+          didFallback = true;
+          listen(0);
+          return;
+        }
+
+        reject(error);
+      };
+      const handleListening = () => {
+        server.off("error", handleError);
+        const address = server.address();
+
+        if (!address || typeof address === "string") {
+          reject(new Error(addressErrorMessage));
+          return;
+        }
+
+        resolve(address.port);
+      };
+
+      server.once("error", handleError);
+      server.once("listening", handleListening);
+      server.listen(port, walletBridgeHost);
+    }
+
+    listen(preferredWalletBridgePort);
+  });
+}
+
+function buildWalletBridgeUrl(port: number, pathname: string) {
+  return `http://${walletBridgeHost}:${port}${pathname}`;
 }
 
 async function startExternalDirectSendBridge(
@@ -739,22 +920,236 @@ async function startExternalDirectSendBridge(
       response.end("Not found");
     });
 
-    walletBridgeServer.once("error", reject);
-    walletBridgeServer.listen(0, "127.0.0.1", () => {
-      const address = walletBridgeServer?.address();
+    void listenWalletBridgeServer(
+      walletBridgeServer,
+      "Could not allocate a local signing bridge port."
+    )
+      .then((port) => {
+        walletBridgeTimeout = setTimeout(() => {
+          reject(new Error("Wallet signing timed out."));
+          void closeWalletBridge();
+        }, 180000);
 
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not allocate a local signing bridge port."));
+        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+      })
+      .catch(reject);
+  });
+
+  return bridgeResult;
+}
+
+async function startExternalGuardedPaymentBridge(
+  window: BrowserWindow,
+  input: GuardedPaymentInput
+) {
+  if (input.network !== "devnet" || input.token !== "USDC") {
+    throw new Error("Guarded payments are currently enabled for devnet USDC only.");
+  }
+
+  await closeWalletBridge();
+
+  const transaction = await buildGuardedPaymentTransaction(input);
+  const nonce = crypto.randomUUID();
+  const bridgeResult = new Promise<{
+    escrowAddress: string;
+    signature: string;
+    unlockAt: string;
+    vaultAddress: string;
+  }>((resolve, reject) => {
+    walletBridgeServer = http.createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+
+      if (request.method === "GET" && url.pathname === "/solana-web3.js") {
+        response.writeHead(200, {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(solanaWeb3BrowserBundle);
         return;
       }
 
-      walletBridgeTimeout = setTimeout(() => {
-        reject(new Error("Wallet signing timed out."));
-        void closeWalletBridge();
-      }, 180000);
+      if (request.method === "GET" && url.pathname === "/sign") {
+        response.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(
+          renderDirectSendPage(nonce, input, transaction, {
+            heading: "Sign PayGuard Guarded Payment",
+            intro:
+              "Review this guarded USDC payment. Funds will move into PayGuard escrow and become claimable after the hold window.",
+            routeLabel: "Guarded Payment"
+          })
+        );
+        return;
+      }
 
-      void shell.openExternal(`http://127.0.0.1:${address.port}/sign`);
+      if (request.method === "POST" && url.pathname === "/signed") {
+        const chunks: Buffer[] = [];
+
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          try {
+            const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+              nonce?: unknown;
+              signature?: unknown;
+            };
+
+            if (payload.nonce !== nonce || typeof payload.signature !== "string") {
+              response.writeHead(400, { "Content-Type": "application/json" });
+              response.end(JSON.stringify({ ok: false }));
+              return;
+            }
+
+            response.writeHead(200, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: true }));
+            resolve({
+              escrowAddress: transaction.escrowAddress,
+              signature: payload.signature,
+              unlockAt: new Date(transaction.unlockAt * 1000).toISOString(),
+              vaultAddress: transaction.vaultAddress
+            });
+            void closeWalletBridge();
+          } catch (error) {
+            response.writeHead(400, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: false }));
+            reject(error);
+            void closeWalletBridge();
+          }
+        });
+        return;
+      }
+
+      response.writeHead(404, { "Content-Type": "text/plain" });
+      response.end("Not found");
     });
+
+    void listenWalletBridgeServer(
+      walletBridgeServer,
+      "Could not allocate a local signing bridge port."
+    )
+      .then((port) => {
+        walletBridgeTimeout = setTimeout(() => {
+          reject(new Error("Wallet signing timed out."));
+          void closeWalletBridge();
+        }, 180000);
+
+        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+      })
+      .catch(reject);
+  });
+
+  return bridgeResult;
+}
+
+async function startExternalGuardedActionBridge(
+  window: BrowserWindow,
+  input: GuardedActionInput,
+  action: "cancel" | "claim"
+) {
+  if (input.network !== "devnet" || input.token !== "USDC") {
+    throw new Error("Guarded payment actions are currently enabled for devnet USDC only.");
+  }
+
+  await closeWalletBridge();
+
+  const transaction = await buildGuardedActionTransaction(input, action);
+  const nonce = crypto.randomUUID();
+  const expectedSigner = action === "cancel" ? input.senderWallet : input.recipientWallet;
+  const bridgeResult = new Promise<{ signature: string }>((resolve, reject) => {
+    walletBridgeServer = http.createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+
+      if (request.method === "GET" && url.pathname === "/solana-web3.js") {
+        response.writeHead(200, {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(solanaWeb3BrowserBundle);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/sign") {
+        response.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store"
+        });
+        response.end(
+          renderDirectSendPage(
+            nonce,
+            {
+              amount: input.amount,
+              network: input.network,
+              recipientWallet: action === "claim" ? input.recipientWallet : input.senderWallet,
+              senderWallet: expectedSigner,
+              token: input.token,
+              walletProvider: input.walletProvider
+            },
+            transaction,
+            {
+              heading:
+                action === "cancel"
+                  ? "Cancel PayGuard Guarded Payment"
+                  : "Claim PayGuard Guarded Payment",
+              intro:
+                action === "cancel"
+                  ? "Approve this transaction to return guarded funds to the sender before the claim window opens."
+                  : "Approve this transaction to claim unlocked guarded funds into the recipient wallet.",
+              routeLabel: action === "cancel" ? "Cancel Escrow" : "Claim Escrow"
+            }
+          )
+        );
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/signed") {
+        const chunks: Buffer[] = [];
+
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          try {
+            const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+              nonce?: unknown;
+              signature?: unknown;
+            };
+
+            if (payload.nonce !== nonce || typeof payload.signature !== "string") {
+              response.writeHead(400, { "Content-Type": "application/json" });
+              response.end(JSON.stringify({ ok: false }));
+              return;
+            }
+
+            response.writeHead(200, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: true }));
+            resolve({ signature: payload.signature });
+            void closeWalletBridge();
+          } catch (error) {
+            response.writeHead(400, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: false }));
+            reject(error);
+            void closeWalletBridge();
+          }
+        });
+        return;
+      }
+
+      response.writeHead(404, { "Content-Type": "text/plain" });
+      response.end("Not found");
+    });
+
+    void listenWalletBridgeServer(
+      walletBridgeServer,
+      "Could not allocate a local signing bridge port."
+    )
+      .then((port) => {
+        walletBridgeTimeout = setTimeout(() => {
+          reject(new Error("Wallet signing timed out."));
+          void closeWalletBridge();
+        }, 180000);
+
+        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+      })
+      .catch(reject);
   });
 
   return bridgeResult;
@@ -822,6 +1217,399 @@ function decimalAmountToBaseUnits(amount: string, decimals: number) {
   }
 
   return BigInt(wholePart) * 10n ** BigInt(decimals) + BigInt(paddedFraction || "0");
+}
+
+async function buildGuardedPaymentTransaction(input: GuardedPaymentInput) {
+  const mintAddress = stablecoinMints[input.network][input.token];
+
+  if (!mintAddress) {
+    throw new Error(`${input.token} is not configured on ${input.network}.`);
+  }
+
+  const sender = new PublicKey(input.senderWallet);
+  const recipient = new PublicKey(input.recipientWallet);
+  const mint = new PublicKey(mintAddress);
+  const decimals = 6;
+  const sourceAta = getAssociatedTokenAddressSync(mint, sender);
+  const escrowId = randomBytes(32);
+  const [escrowPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("payguard-escrow"), sender.toBuffer(), escrowId],
+    payguardEscrowProgramId
+  );
+  const vaultAta = getAssociatedTokenAddressSync(mint, escrowPda, true);
+  const connection = new Connection(solanaRpcUrls[input.network], "confirmed");
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const transaction = new Transaction({
+    blockhash,
+    feePayer: sender,
+    lastValidBlockHeight
+  });
+  const unlockAt = Math.floor(Date.now() / 1000) + Math.round(input.guardedHoldHours * 3600);
+  const instructionData = Buffer.alloc(49);
+
+  instructionData[0] = 0;
+  instructionData.writeBigUInt64LE(decimalAmountToBaseUnits(input.amount, decimals), 1);
+  instructionData.writeBigInt64LE(BigInt(unlockAt), 9);
+  escrowId.copy(instructionData, 17);
+
+  transaction.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      sender,
+      vaultAta,
+      escrowPda,
+      mint
+    ),
+    new TransactionInstruction({
+      programId: payguardEscrowProgramId,
+      keys: [
+        { pubkey: sender, isSigner: true, isWritable: true },
+        { pubkey: escrowPda, isSigner: false, isWritable: true },
+        { pubkey: sourceAta, isSigner: false, isWritable: true },
+        { pubkey: vaultAta, isSigner: false, isWritable: true },
+        { pubkey: recipient, isSigner: false, isWritable: false },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+      ],
+      data: instructionData
+    })
+  );
+
+  return {
+    base64: transaction
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString("base64"),
+    escrowAddress: escrowPda.toBase58(),
+    mintAddress,
+    rpcUrl: solanaRpcUrls[input.network],
+    unlockAt,
+    vaultAddress: vaultAta.toBase58()
+  };
+}
+
+async function buildGuardedActionTransaction(
+  input: GuardedActionInput,
+  action: "cancel" | "claim"
+) {
+  const mintAddress = stablecoinMints[input.network][input.token];
+
+  if (!mintAddress) {
+    throw new Error(`${input.token} is not configured on ${input.network}.`);
+  }
+
+  const sender = new PublicKey(input.senderWallet);
+  const recipient = new PublicKey(input.recipientWallet);
+  const signer = action === "cancel" ? sender : recipient;
+  const destinationOwner = action === "cancel" ? sender : recipient;
+  const mint = new PublicKey(mintAddress);
+  const escrow = new PublicKey(input.escrowAddress);
+  const vault = new PublicKey(input.vaultAddress);
+  const destinationAta = getAssociatedTokenAddressSync(mint, destinationOwner);
+  const connection = new Connection(solanaRpcUrls[input.network], "confirmed");
+  const escrowState = await getEscrowState(connection, escrow);
+
+  await validateGuardedActionState({
+    action,
+    escrowState,
+    input,
+    mint,
+    recipient,
+    sender,
+    vault
+  });
+
+  await validateGuardedActionFeePayer({
+    connection,
+    destinationAta,
+    signer
+  });
+
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const transaction = new Transaction({
+    blockhash,
+    feePayer: signer,
+    lastValidBlockHeight
+  });
+
+  transaction.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      signer,
+      destinationAta,
+      destinationOwner,
+      mint
+    ),
+    new TransactionInstruction({
+      programId: payguardEscrowProgramId,
+      keys:
+        action === "cancel"
+          ? [
+              { pubkey: sender, isSigner: true, isWritable: true },
+              { pubkey: escrow, isSigner: false, isWritable: true },
+              { pubkey: vault, isSigner: false, isWritable: true },
+              { pubkey: destinationAta, isSigner: false, isWritable: true },
+              { pubkey: mint, isSigner: false, isWritable: false },
+              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+            ]
+          : [
+              { pubkey: recipient, isSigner: true, isWritable: true },
+              { pubkey: escrow, isSigner: false, isWritable: true },
+              { pubkey: vault, isSigner: false, isWritable: true },
+              { pubkey: destinationAta, isSigner: false, isWritable: true },
+              { pubkey: mint, isSigner: false, isWritable: false },
+              { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+            ],
+      data: Buffer.from([action === "cancel" ? 1 : 2])
+    })
+  );
+
+  return {
+    base64: transaction
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString("base64"),
+    mintAddress,
+    rpcUrl: solanaRpcUrls[input.network]
+  };
+}
+
+async function getEscrowState(connection: Connection, escrowAddress: PublicKey) {
+  const account = await connection.getAccountInfo(escrowAddress, "confirmed");
+
+  if (!account) {
+    throw new Error("Guarded payment escrow was not found on devnet.");
+  }
+
+  const state = decodeEscrowState(escrowAddress, account.data);
+
+  if (!state) {
+    throw new Error("Guarded payment escrow data is invalid.");
+  }
+
+  return state;
+}
+
+async function validateGuardedActionState({
+  action,
+  escrowState,
+  input,
+  mint,
+  recipient,
+  sender,
+  vault
+}: {
+  action: "cancel" | "claim";
+  escrowState: DecodedEscrowState;
+  input: GuardedActionInput;
+  mint: PublicKey;
+  recipient: PublicKey;
+  sender: PublicKey;
+  vault: PublicKey;
+}) {
+  if (!escrowState.sender.equals(sender)) {
+    throw new Error("Guarded payment sender does not match this escrow.");
+  }
+
+  if (!escrowState.recipient.equals(recipient)) {
+    throw new Error("Guarded payment recipient does not match this escrow.");
+  }
+
+  if (!escrowState.mint.equals(mint)) {
+    throw new Error("Guarded payment mint does not match the selected token.");
+  }
+
+  if (!escrowState.vault.equals(vault)) {
+    throw new Error("Guarded payment vault does not match this escrow.");
+  }
+
+  if (escrowState.status !== "funded") {
+    throw new Error(`Guarded payment is already ${escrowState.status}.`);
+  }
+
+  const amountBaseUnits = decimalAmountToBaseUnits(input.amount, 6);
+
+  if (amountBaseUnits !== escrowState.amount) {
+    throw new Error("Guarded payment amount does not match this escrow.");
+  }
+
+  const chainNow = await getApproximateChainUnixTimestamp(input.network);
+
+  if (action === "cancel" && chainNow >= escrowState.unlockAt) {
+    throw new Error("Guarded payment is already unlocked. It can be claimed by the recipient.");
+  }
+
+  if (action === "claim" && chainNow < escrowState.unlockAt) {
+    const secondsLeft = escrowState.unlockAt - chainNow;
+    throw new Error(`Guarded payment is not unlocked yet. Try again in about ${formatDuration(secondsLeft)}.`);
+  }
+}
+
+async function validateGuardedActionFeePayer({
+  connection,
+  destinationAta,
+  signer
+}: {
+  connection: Connection;
+  destinationAta: PublicKey;
+  signer: PublicKey;
+}) {
+  const [balance, destinationAccount, ataRent] = await Promise.all([
+    connection.getBalance(signer, "confirmed"),
+    connection.getAccountInfo(destinationAta, "confirmed"),
+    connection.getMinimumBalanceForRentExemption(165)
+  ]);
+  const estimatedFeeLamports = 10000;
+  const requiredLamports = (destinationAccount ? 0 : ataRent) + estimatedFeeLamports;
+
+  if (balance < requiredLamports) {
+    const requiredSol = requiredLamports / 1_000_000_000;
+    const balanceSol = balance / 1_000_000_000;
+
+    throw new Error(
+      `Connected wallet needs about ${requiredSol.toFixed(4)} SOL for claim/cancel fees and token account rent. Current balance is ${balanceSol.toFixed(4)} SOL.`
+    );
+  }
+}
+
+async function getApproximateChainUnixTimestamp(network: SolanaNetwork) {
+  const connection = new Connection(solanaRpcUrls[network], "confirmed");
+  const slot = await connection.getSlot("confirmed");
+  const blockTime = await connection.getBlockTime(slot);
+
+  return blockTime ?? Math.floor(Date.now() / 1000);
+}
+
+function formatDuration(totalSeconds: number) {
+  const seconds = Math.max(1, Math.ceil(totalSeconds));
+  const minutes = Math.ceil(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+
+  const hours = Math.ceil(minutes / 60);
+
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+async function listGuardedPayments(
+  walletAddress: string,
+  network: SolanaNetwork
+): Promise<GuardedPaymentRecord[]> {
+  if (network !== "devnet") {
+    return [];
+  }
+
+  const wallet = new PublicKey(walletAddress);
+  const connection = new Connection(solanaRpcUrls[network], "confirmed");
+  const accounts = await connection.getProgramAccounts(payguardEscrowProgramId, {
+    commitment: "confirmed"
+  });
+
+  return accounts
+    .map((account) => decodeEscrowAccount(account.pubkey, account.account.data, network, wallet))
+    .filter((record): record is GuardedPaymentRecord => Boolean(record))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function decodeEscrowAccount(
+  escrowAddress: PublicKey,
+  data: Buffer,
+  network: SolanaNetwork,
+  wallet: PublicKey
+): GuardedPaymentRecord | null {
+  const state = decodeEscrowState(escrowAddress, data);
+
+  if (!state) {
+    return null;
+  }
+
+  const role =
+    state.sender.equals(wallet) ? "sender" : state.recipient.equals(wallet) ? "recipient" : null;
+
+  if (!role) {
+    return null;
+  }
+
+  const token = getStablecoinTokenForMint(network, state.mint);
+
+  if (!token) {
+    return null;
+  }
+
+  return {
+    amount: formatBaseUnits(state.amount, 6),
+    createdAt: new Date(state.createdAt * 1000).toISOString(),
+    escrowAddress: escrowAddress.toBase58(),
+    mintAddress: state.mint.toBase58(),
+    network,
+    recipientWallet: state.recipient.toBase58(),
+    role,
+    senderWallet: state.sender.toBase58(),
+    status: state.status,
+    token,
+    unlockAt: new Date(state.unlockAt * 1000).toISOString(),
+    vaultAddress: state.vault.toBase58()
+  };
+}
+
+function decodeEscrowState(
+  escrowAddress: PublicKey,
+  data: Buffer
+): DecodedEscrowState | null {
+  if (data.length < 186) {
+    return null;
+  }
+
+  return {
+    amount: data.readBigUInt64LE(161),
+    createdAt: Number(data.readBigInt64LE(169)),
+    escrowAddress,
+    mint: new PublicKey(data.subarray(65, 97)),
+    recipient: new PublicKey(data.subarray(33, 65)),
+    sender: new PublicKey(data.subarray(1, 33)),
+    status: decodeEscrowStatus(data.readUInt8(0)),
+    unlockAt: Number(data.readBigInt64LE(177)),
+    vault: new PublicKey(data.subarray(97, 129))
+  };
+}
+
+function getStablecoinTokenForMint(network: SolanaNetwork, mint: PublicKey) {
+  const mintAddress = mint.toBase58();
+  const mints = stablecoinMints[network];
+
+  if (mints.USDC === mintAddress) {
+    return "USDC" as const;
+  }
+
+  if (mints.USDT === mintAddress) {
+    return "USDT" as const;
+  }
+
+  return null;
+}
+
+function decodeEscrowStatus(status: number): GuardedPaymentRecord["status"] {
+  if (status === 1) {
+    return "funded";
+  }
+
+  if (status === 2) {
+    return "cancelled";
+  }
+
+  if (status === 3) {
+    return "claimed";
+  }
+
+  return "unknown";
+}
+
+function formatBaseUnits(amount: bigint, decimals: number) {
+  const base = 10n ** BigInt(decimals);
+  const whole = amount / base;
+  const fractional = amount % base;
+  const fractionalText = fractional.toString().padStart(decimals, "0").replace(/0+$/, "");
+
+  return fractionalText ? `${whole}.${fractionalText}` : whole.toString();
 }
 
 function renderWalletConnectPage(nonce: string) {
@@ -919,6 +1707,16 @@ function renderWalletConnectPage(nonce: string) {
       return null;
     }
 
+    async function getConnectedPublicKey(provider) {
+      try {
+        const trustedResponse = await provider.connect({ onlyIfTrusted: true });
+        return trustedResponse && trustedResponse.publicKey ? trustedResponse.publicKey : provider.publicKey;
+      } catch {
+        const response = await provider.connect();
+        return response && response.publicKey ? response.publicKey : provider.publicKey;
+      }
+    }
+
     async function connect(kind) {
       const provider = getProvider(kind);
 
@@ -929,8 +1727,7 @@ function renderWalletConnectPage(nonce: string) {
 
       try {
         setStatus("Opening wallet approval...");
-        const response = await provider.connect();
-        const publicKey = response && response.publicKey ? response.publicKey : provider.publicKey;
+        const publicKey = await getConnectedPublicKey(provider);
         const address = typeof publicKey === "string" ? publicKey : publicKey && publicKey.toString();
 
         if (!address) {
@@ -964,7 +1761,13 @@ function renderWalletConnectPage(nonce: string) {
 function renderDirectSendPage(
   nonce: string,
   input: DirectSendInput,
-  transaction: { base64: string; mintAddress: string; rpcUrl: string }
+  transaction: { base64: string; mintAddress: string; rpcUrl: string },
+  copy = {
+    heading: "Sign PayGuard Direct Payment",
+    intro:
+      "Review this direct stablecoin transfer, then approve it in Solflare or Phantom. PayGuard never sees your private key.",
+    routeLabel: "Direct Send"
+  }
 ) {
   return `<!doctype html>
 <html lang="en">
@@ -1068,17 +1871,17 @@ function renderDirectSendPage(
 </head>
 <body>
   <main>
-    <h1>Sign PayGuard Direct Payment</h1>
-    <p>Review this direct stablecoin transfer, then approve it in Solflare or Phantom. PayGuard never sees your private key.</p>
+    <h1>${escapeHtml(copy.heading)}</h1>
+    <p>${escapeHtml(copy.intro)}</p>
     <dl>
+      <div class="row"><dt>Route</dt><dd>${escapeHtml(copy.routeLabel)}</dd></div>
       <div class="row"><dt>Amount</dt><dd>${escapeHtml(input.amount)} ${escapeHtml(input.token)}</dd></div>
       <div class="row"><dt>Network</dt><dd>${escapeHtml(input.network)}</dd></div>
       <div class="row"><dt>From</dt><dd title="${escapeHtml(input.senderWallet)}">${escapeHtml(input.senderWallet)}</dd></div>
       <div class="row"><dt>To</dt><dd title="${escapeHtml(input.recipientWallet)}">${escapeHtml(input.recipientWallet)}</dd></div>
       <div class="row"><dt>Mint</dt><dd title="${escapeHtml(transaction.mintAddress)}">${escapeHtml(transaction.mintAddress)}</dd></div>
     </dl>
-    <button id="solflare">Sign with Solflare</button>
-    <button id="phantom" class="secondary">Sign with Phantom</button>
+    ${renderSigningButtons(input.walletProvider)}
     <div id="status">Waiting for wallet selection.</div>
   </main>
   <script src="/solana-web3.js"></script>
@@ -1111,6 +1914,16 @@ function renderDirectSendPage(
       return bytes;
     }
 
+    async function getConnectedPublicKey(provider) {
+      try {
+        const trustedResponse = await provider.connect({ onlyIfTrusted: true });
+        return trustedResponse && trustedResponse.publicKey ? trustedResponse.publicKey : provider.publicKey;
+      } catch {
+        const connectResponse = await provider.connect();
+        return connectResponse && connectResponse.publicKey ? connectResponse.publicKey : provider.publicKey;
+      }
+    }
+
     async function sign(kind) {
       const provider = getProvider(kind);
 
@@ -1121,12 +1934,11 @@ function renderDirectSendPage(
 
       try {
         setStatus("Opening wallet approval...");
-        const connectResponse = await provider.connect();
-        const publicKey = connectResponse && connectResponse.publicKey ? connectResponse.publicKey : provider.publicKey;
+        const publicKey = await getConnectedPublicKey(provider);
         const address = typeof publicKey === "string" ? publicKey : publicKey && publicKey.toString();
 
         if (address !== expectedAddress) {
-          throw new Error("Connected wallet does not match the PayGuard sender wallet.");
+          throw new Error("Connected wallet does not match the PayGuard signing wallet.");
         }
 
         const transaction = solanaWeb3.Transaction.from(base64ToBytes(transactionBase64));
@@ -1158,15 +1970,34 @@ function renderDirectSendPage(
         });
         setStatus("Payment submitted. You can return to PayGuard.");
       } catch (error) {
-        setStatus(error && error.message ? error.message : "Payment signing failed.");
+        const details = error && (error.message || error.name || error.code)
+          ? [error.message, error.name && error.name !== error.message ? error.name : "", error.code ? "Code " + error.code : ""].filter(Boolean).join(" ")
+          : "";
+        setStatus(details || "Payment signing failed. Check the wallet popup for the rejection reason.");
       }
     }
 
-    document.getElementById("solflare").addEventListener("click", () => sign("solflare"));
-    document.getElementById("phantom").addEventListener("click", () => sign("phantom"));
+    const solflareButton = document.getElementById("solflare");
+    const phantomButton = document.getElementById("phantom");
+
+    if (solflareButton) solflareButton.addEventListener("click", () => sign("solflare"));
+    if (phantomButton) phantomButton.addEventListener("click", () => sign("phantom"));
   </script>
 </body>
 </html>`;
+}
+
+function renderSigningButtons(walletProvider?: WalletProvider) {
+  if (walletProvider === "solflare") {
+    return `<button id="solflare">Sign with Solflare</button>`;
+  }
+
+  if (walletProvider === "phantom") {
+    return `<button id="phantom">Sign with Phantom</button>`;
+  }
+
+  return `<button id="solflare">Sign with Solflare</button>
+    <button id="phantom" class="secondary">Sign with Phantom</button>`;
 }
 
 function escapeHtml(value: string) {

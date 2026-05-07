@@ -5,6 +5,7 @@ import banner from "../../../assets/payguardbanner.png";
 const navigationItems: { label: string; screen: AppScreen | null }[] = [
   { label: "Dashboard", screen: "home" },
   { label: "History", screen: "history" },
+  { label: "Guarded", screen: "guarded" },
   { label: "Recipients", screen: "recipients" }
 ];
 const themeStorageKey = "payguard-theme";

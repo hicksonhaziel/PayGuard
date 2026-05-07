@@ -23,6 +23,14 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
     ipcRenderer.invoke("wallet:get-balances", input),
   startDirectSend: (input: unknown) =>
     ipcRenderer.invoke("wallet:direct-send", input),
+  startGuardedPayment: (input: unknown) =>
+    ipcRenderer.invoke("wallet:guarded-payment", input),
+  startGuardedCancel: (input: unknown) =>
+    ipcRenderer.invoke("wallet:guarded-cancel", input),
+  startGuardedClaim: (input: unknown) =>
+    ipcRenderer.invoke("wallet:guarded-claim", input),
+  listGuardedPayments: (input: unknown) =>
+    ipcRenderer.invoke("wallet:list-guarded-payments", input),
   startExternalWalletConnect: () =>
     ipcRenderer.invoke("wallet:start-external-connect"),
   store: {

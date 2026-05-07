@@ -10,6 +10,7 @@ import { TopNavigation } from "./components/layout/top-navigation";
 import { AnalyzeStatePage } from "./pages/analyze-state-page";
 import { ConfirmPage } from "./pages/confirm-page";
 import { HistoryPage } from "./pages/history-page";
+import { GuardedPaymentsPage } from "./pages/guarded-payments-page";
 import { HomePage } from "./pages/home-page";
 import { NewPaymentPage } from "./pages/new-payment-page";
 import { RecipientsPage } from "./pages/recipients-page";
@@ -18,6 +19,7 @@ import { SuccessPage } from "./pages/success-page";
 export type AppScreen =
   | "home"
   | "history"
+  | "guarded"
   | "recipients"
   | "new-payment"
   | "analyzing"
@@ -41,7 +43,10 @@ export type PaymentDecision = {
   recipientName: string;
   memo: string;
   selectedRoute: "Direct Send" | "Guarded Payment" | "Block";
+  escrowAddress?: string;
   txSignature?: string;
+  unlockAt?: string;
+  vaultAddress?: string;
   guardedHoldHours: number;
   verdict: RiskVerdict;
 };
@@ -59,11 +64,12 @@ export type AnalysisStepKey = "ocr" | "rag" | "llm" | "explanation";
 const screenOrder: Record<AppScreen, number> = {
   home: 0,
   history: 1,
-  recipients: 2,
-  "new-payment": 3,
-  analyzing: 4,
-  confirm: 5,
-  success: 6
+  guarded: 2,
+  recipients: 3,
+  "new-payment": 4,
+  analyzing: 5,
+  confirm: 6,
+  success: 7
 };
 const walletStorageKey = "payguard-connected-wallet";
 const networkStorageKey = "payguard-solana-network";
@@ -218,7 +224,8 @@ export default function App() {
         network: selectedNetwork,
         recipientWallet: paymentDecision.walletAddress,
         senderWallet: connectedWallet.address,
-        token: paymentDecision.token
+        token: paymentDecision.token,
+        walletProvider: connectedWallet.provider
       });
 
       setPaymentDecision({
@@ -234,17 +241,44 @@ export default function App() {
     }
   }
 
-  function chooseGuardedPayment(guardedHoldHours: number) {
-    if (paymentDecision) {
-      setPaymentDecision({
-        ...paymentDecision,
-        guardedHoldHours,
-        selectedRoute: "Guarded Payment",
-        txSignature: `demo-${crypto.randomUUID()}`
-      });
+  async function chooseGuardedPayment(guardedHoldHours: number) {
+    if (!paymentDecision || !connectedWallet) {
+      setPaymentActionError("Connect a wallet before signing this guarded payment.");
+      return;
     }
 
-    navigateTo("success");
+    if (selectedNetwork !== "devnet" || paymentDecision.token !== "USDC") {
+      setPaymentActionError("Guarded payments are currently enabled for devnet USDC only.");
+      return;
+    }
+
+    try {
+      setPaymentActionError(null);
+      const result = await window.payguardDesktop!.startGuardedPayment({
+        amount: paymentDecision.amount,
+        guardedHoldHours,
+        network: selectedNetwork,
+        recipientWallet: paymentDecision.walletAddress,
+        senderWallet: connectedWallet.address,
+        token: "USDC",
+        walletProvider: connectedWallet.provider
+      });
+
+      setPaymentDecision({
+        ...paymentDecision,
+        escrowAddress: result.escrowAddress,
+        guardedHoldHours,
+        selectedRoute: "Guarded Payment",
+        txSignature: result.signature,
+        unlockAt: result.unlockAt,
+        vaultAddress: result.vaultAddress
+      });
+      navigateTo("success");
+    } catch (error) {
+      setPaymentActionError(
+        error instanceof Error ? error.message : "Guarded payment signing failed."
+      );
+    }
   }
 
   async function connectWallet() {
@@ -346,6 +380,8 @@ export default function App() {
           />
         ) : visibleScreen === "history" ? (
           <HistoryPage network={selectedNetwork} wallet={connectedWallet} />
+        ) : visibleScreen === "guarded" ? (
+          <GuardedPaymentsPage network={selectedNetwork} wallet={connectedWallet} />
         ) : visibleScreen === "recipients" ? (
           <RecipientsPage
             network={selectedNetwork}
@@ -478,9 +514,12 @@ function buildPaymentDecision(
       request.ocrRecipientName ||
       "Unknown recipient",
     memo: request.payment.memo || "",
+    escrowAddress: undefined,
     guardedHoldHours: 24,
     selectedRoute: verdict.recommendedRoute,
     txSignature: undefined,
+    unlockAt: undefined,
+    vaultAddress: undefined,
     verdict
   };
 }
