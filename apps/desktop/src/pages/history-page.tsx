@@ -20,6 +20,8 @@ export function HistoryPage({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<HistoryTab>("All Payments");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedReceipt, setSelectedReceipt] =
+    useState<StoredPaymentHistory | null>(null);
 
   useEffect(() => {
     async function loadHistory() {
@@ -144,7 +146,11 @@ export function HistoryPage({
         ) : filteredTransactions.length ? (
           <section className="grid gap-3">
             {filteredTransactions.map((transaction) => (
-              <TransactionCard key={transaction.id} transaction={transaction} />
+              <TransactionCard
+                key={transaction.id}
+                onViewReceipt={() => setSelectedReceipt(transaction)}
+                transaction={transaction}
+              />
             ))}
           </section>
         ) : (
@@ -155,15 +161,22 @@ export function HistoryPage({
           </div>
         )}
       </div>
+      {selectedReceipt ? (
+        <ReceiptModal
+          onClose={() => setSelectedReceipt(null)}
+          transaction={selectedReceipt}
+        />
+      ) : null}
     </main>
   );
 }
 
 interface TransactionCardProps {
+  onViewReceipt: () => void;
   transaction: StoredPaymentHistory;
 }
 
-function TransactionCard({ transaction }: TransactionCardProps) {
+function TransactionCard({ onViewReceipt, transaction }: TransactionCardProps) {
   const isBlocked = transaction.verdict === "Block";
   const icon = isBlocked ? "block" : "arrow_upward";
 
@@ -217,12 +230,145 @@ function TransactionCard({ transaction }: TransactionCardProps) {
 
         <button
           className="w-full whitespace-nowrap rounded-lg border border-[#1a202c] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-[#1a202c] transition-colors hover:bg-[#ebeef0] dark:border-white/80 dark:text-white dark:hover:bg-white/10 md:w-auto"
+          onClick={onViewReceipt}
           type="button"
         >
           View Receipt
         </button>
       </div>
     </article>
+  );
+}
+
+function ReceiptModal({
+  onClose,
+  transaction
+}: {
+  onClose: () => void;
+  transaction: StoredPaymentHistory;
+}) {
+  const isBlocked = transaction.verdict === "Block";
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#030813]/50 px-4 py-6 backdrop-blur-sm">
+      <section className="max-h-[90vh] w-full max-w-[640px] overflow-y-auto rounded-2xl border border-[#e0e3e5] bg-white shadow-[0_24px_70px_rgba(3,8,19,0.25)] dark:border-white/10 dark:bg-[#111827]">
+        <header className="flex items-start justify-between gap-4 border-b border-[#e0e3e5] p-5 dark:border-white/10">
+          <div>
+            <p className="m-0 text-[11px] font-bold uppercase tracking-[0.08em] text-[#76777c] dark:text-slate-500">
+              PayGuard Receipt
+            </p>
+            <h2 className="m-0 mt-1 font-['Manrope'] text-2xl font-bold text-[#181c1e] dark:text-white">
+              {transaction.amount} {transaction.token}
+            </h2>
+            <p className="mt-1 text-sm text-[#45474c] dark:text-slate-400">
+              {transaction.recipientName} · {formatDate(transaction.paidAt)}
+            </p>
+          </div>
+
+          <button
+            aria-label="Close receipt"
+            className="pg-icon-button"
+            onClick={onClose}
+            type="button"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </header>
+
+        <div className="grid gap-4 p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <ReceiptBadge
+              className={
+                isBlocked
+                  ? "bg-red-50 text-red-700 dark:bg-red-300/10 dark:text-red-300"
+                  : "bg-[#006c49]/10 text-[#006c49] dark:bg-[#6ffbbe]/10 dark:text-[#6ffbbe]"
+              }
+              label={transaction.verdict}
+            />
+            <ReceiptBadge
+              className="bg-[#f1f4f6] text-[#45474c] dark:bg-white/10 dark:text-slate-300"
+              label={transaction.route}
+            />
+            <ReceiptBadge
+              className="bg-[#f1f4f6] text-[#45474c] dark:bg-white/10 dark:text-slate-300"
+              label={transaction.network}
+            />
+          </div>
+
+          <section className="grid gap-2 rounded-2xl border border-[#e5e9eb] bg-[#f7fafc] p-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <ReceiptRow label="Recipient" value={transaction.recipientName} />
+            <ReceiptRow label="Recipient wallet" mono value={transaction.recipientWallet} />
+            <ReceiptRow label="Sender wallet" mono value={transaction.senderWallet} />
+            <ReceiptRow label="Amount" value={`${transaction.amount} ${transaction.token}`} />
+            <ReceiptRow label="Risk score" value={`${transaction.riskScore}/100`} />
+            <ReceiptRow label="Source" value={formatSource(transaction.source)} />
+            <ReceiptRow label="Created" value={formatDate(transaction.createdAt)} />
+            <ReceiptRow label="Paid" value={formatDate(transaction.paidAt)} />
+            <ReceiptRow
+              label="Transaction"
+              mono
+              value={transaction.txSignature || "No on-chain signature"}
+            />
+          </section>
+
+          {transaction.summary ? (
+            <section className="rounded-2xl border border-[#e5e9eb] bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+              <p className="m-0 text-[11px] font-bold uppercase tracking-[0.08em] text-[#76777c] dark:text-slate-500">
+                Summary
+              </p>
+              <p className="m-0 mt-2 text-sm leading-6 text-[#45474c] dark:text-slate-300">
+                {transaction.summary}
+              </p>
+            </section>
+          ) : null}
+
+          <div className="flex justify-end">
+            <button
+              className="rounded-xl bg-[#030813] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-[#6ffbbe] dark:text-[#002113]"
+              onClick={onClose}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReceiptBadge({
+  className,
+  label
+}: {
+  className: string;
+  label: string;
+}) {
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.05em] ${className}`}>
+      {label}
+    </span>
+  );
+}
+
+function ReceiptRow({
+  label,
+  mono = false,
+  value
+}: {
+  label: string;
+  mono?: boolean;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-1 border-b border-[#e5e9eb] py-2 last:border-b-0 dark:border-white/10 md:grid-cols-[150px_1fr] md:gap-3">
+      <span className="text-xs font-semibold uppercase tracking-[0.05em] text-[#76777c] dark:text-slate-500">
+        {label}
+      </span>
+      <span className={`break-all text-sm text-[#181c1e] dark:text-white ${mono ? "font-mono text-xs" : ""}`}>
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -242,4 +388,12 @@ function formatSignature(signature: string) {
   }
 
   return `${signature.slice(0, 6)}...${signature.slice(-6)}`;
+}
+
+function formatSource(source: StoredPaymentHistory["source"]) {
+  if (source === "onchain-import") {
+    return "On-chain import";
+  }
+
+  return source.charAt(0).toUpperCase() + source.slice(1);
 }
