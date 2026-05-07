@@ -771,6 +771,7 @@ async function startExternalWalletBridge(window: BrowserWindow) {
 
           response.writeHead(200, { "Content-Type": "application/json" });
           response.end(JSON.stringify({ ok: true }));
+          focusPayGuardWindow(window);
           void closeWalletBridge();
         } catch {
           response.writeHead(400, { "Content-Type": "application/json" });
@@ -812,6 +813,19 @@ async function closeWalletBridge() {
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
   });
+}
+
+function focusPayGuardWindow(window: BrowserWindow) {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  if (window.isMinimized()) {
+    window.restore();
+  }
+
+  window.show();
+  window.focus();
 }
 
 function listenWalletBridgeServer(server: http.Server, addressErrorMessage: string) {
@@ -904,6 +918,7 @@ async function startExternalDirectSendBridge(
 
             response.writeHead(200, { "Content-Type": "application/json" });
             response.end(JSON.stringify({ ok: true }));
+            focusPayGuardWindow(window);
             resolve({ signature: payload.signature });
             void closeWalletBridge();
           } catch (error) {
@@ -1003,6 +1018,7 @@ async function startExternalGuardedPaymentBridge(
 
             response.writeHead(200, { "Content-Type": "application/json" });
             response.end(JSON.stringify({ ok: true }));
+            focusPayGuardWindow(window);
             resolve({
               escrowAddress: transaction.escrowAddress,
               signature: payload.signature,
@@ -1121,6 +1137,7 @@ async function startExternalGuardedActionBridge(
 
             response.writeHead(200, { "Content-Type": "application/json" });
             response.end(JSON.stringify({ ok: true }));
+            focusPayGuardWindow(window);
             resolve({ signature: payload.signature });
             void closeWalletBridge();
           } catch (error) {
@@ -1682,6 +1699,16 @@ function renderWalletConnectPage(nonce: string) {
       margin-top: 14px;
       padding: 12px;
     }
+    #status.success {
+      background: #e6fff3;
+      color: #006c49;
+      font-weight: 800;
+    }
+    #status.error {
+      background: #fff1f2;
+      color: #9f1239;
+      font-weight: 800;
+    }
   </style>
 </head>
 <body>
@@ -1696,8 +1723,16 @@ function renderWalletConnectPage(nonce: string) {
     const nonce = ${JSON.stringify(nonce)};
     const statusEl = document.getElementById("status");
 
-    function setStatus(message) {
+    function setStatus(message, state) {
       statusEl.textContent = message;
+      statusEl.className = state || "";
+    }
+
+    function closeSoon() {
+      window.setTimeout(() => {
+        window.close();
+        setStatus("Wallet connected successfully. You can close this tab and return to PayGuard.", "success");
+      }, 6000);
     }
 
     function getProvider(kind) {
@@ -1735,7 +1770,7 @@ function renderWalletConnectPage(nonce: string) {
         }
 
         setStatus("Sending public address back to PayGuard...");
-        await fetch("/wallet-connected", {
+        const result = await fetch("/wallet-connected", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1745,9 +1780,14 @@ function renderWalletConnectPage(nonce: string) {
             provider: kind
           })
         });
-        setStatus("Wallet connected. You can return to PayGuard.");
+        if (!result.ok) {
+          throw new Error("PayGuard did not accept the wallet connection.");
+        }
+
+        setStatus("Success. Wallet connected to PayGuard. This tab will close in a few seconds.", "success");
+        closeSoon();
       } catch (error) {
-        setStatus(error && error.message ? error.message : "Wallet connection failed.");
+        setStatus(error && error.message ? "Failed. " + error.message : "Failed. Wallet connection failed.", "error");
       }
     }
 
@@ -1867,6 +1907,16 @@ function renderDirectSendPage(
       margin-top: 14px;
       padding: 12px;
     }
+    #status.success {
+      background: #e6fff3;
+      color: #006c49;
+      font-weight: 800;
+    }
+    #status.error {
+      background: #fff1f2;
+      color: #9f1239;
+      font-weight: 800;
+    }
   </style>
 </head>
 <body>
@@ -1892,8 +1942,16 @@ function renderDirectSendPage(
     const transactionBase64 = ${JSON.stringify(transaction.base64)};
     const statusEl = document.getElementById("status");
 
-    function setStatus(message) {
+    function setStatus(message, state) {
       statusEl.textContent = message;
+      statusEl.className = state || "";
+    }
+
+    function closeSoon() {
+      window.setTimeout(() => {
+        window.close();
+        setStatus("Success. Transaction sent to PayGuard. You can close this tab.", "success");
+      }, 7000);
     }
 
     function getProvider(kind) {
@@ -1963,17 +2021,22 @@ function renderDirectSendPage(
         }
 
         setStatus("Returning signature to PayGuard...");
-        await fetch("/signed", {
+        const result = await fetch("/signed", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ nonce, signature })
         });
-        setStatus("Payment submitted. You can return to PayGuard.");
+        if (!result.ok) {
+          throw new Error("PayGuard did not accept the signed transaction.");
+        }
+
+        setStatus("Success. Transaction submitted to PayGuard. This tab will close in a few seconds.", "success");
+        closeSoon();
       } catch (error) {
         const details = error && (error.message || error.name || error.code)
           ? [error.message, error.name && error.name !== error.message ? error.name : "", error.code ? "Code " + error.code : ""].filter(Boolean).join(" ")
           : "";
-        setStatus(details || "Payment signing failed. Check the wallet popup for the rejection reason.");
+        setStatus(details ? "Failed. " + details : "Failed. Payment signing failed. Check the wallet popup for the rejection reason.", "error");
       }
     }
 
