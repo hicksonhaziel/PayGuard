@@ -235,6 +235,12 @@ Private keys are never stored by PayGuard. Signing happens in Phantom or Solflar
 
 ## Demo Scenarios
 
+Presentation deck:
+
+```text
+https://qvac-payguard-9ekt8fa.gamma.site/
+```
+
 ### Safe Direct Send
 
 1. Add a trusted recipient.
