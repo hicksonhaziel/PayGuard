@@ -255,7 +255,51 @@ function isRiskVerdictShape(value: unknown): value is RiskVerdict {
 
 function createRuleBasedFallbackVerdict(input: RiskAnalysisInput): RiskVerdict {
   const hasSuspiciousText = containsSuspiciousPaymentLanguage(input);
+  const ocrConsistency = analyzeOcrConsistency(input);
   const recommendation = input.recipientMatch?.recommendation ?? "no-match";
+
+  if (ocrConsistency.hasBlockingMismatch && hasSuspiciousText) {
+    return {
+      verdict: "Block",
+      riskScore: 90,
+      recommendedRoute: "Block",
+      reasons: [
+        ...ocrConsistency.reasons,
+        "Payment context contains scam-like urgency or wallet safety language.",
+        "PayGuard used deterministic local risk rules after the LLM returned malformed JSON."
+      ],
+      summary:
+        "The document conflicts with the entered payment and contains suspicious context, so this payment should not be signed."
+    };
+  }
+
+  if (ocrConsistency.hasBlockingMismatch) {
+    return {
+      verdict: "Review",
+      riskScore: 72,
+      recommendedRoute: "Guarded Payment",
+      reasons: [
+        ...ocrConsistency.reasons,
+        "PayGuard used deterministic local risk rules after the LLM returned malformed JSON."
+      ],
+      summary:
+        "The uploaded document does not match the entered payment fields, so a guarded payment is safer than direct send."
+    };
+  }
+
+  if (ocrConsistency.hasIncompleteDocument) {
+    return {
+      verdict: "Review",
+      riskScore: 50,
+      recommendedRoute: "Guarded Payment",
+      reasons: [
+        ...ocrConsistency.reasons,
+        "PayGuard used deterministic local risk rules after the LLM returned malformed JSON."
+      ],
+      summary:
+        "The document is missing payment details needed for a full match, so this payment should be reviewed."
+    };
+  }
 
   if (hasSuspiciousText) {
     return {
@@ -298,6 +342,7 @@ function createRuleBasedFallbackVerdict(input: RiskAnalysisInput): RiskVerdict {
 
 function buildRiskPrompt(input: RiskAnalysisInput) {
   const bestMatch = input.recipientMatch?.bestMatch;
+  const ocrConsistency = analyzeOcrConsistency(input);
 
   return [
     "Analyze this Solana stablecoin payment before signature.",
@@ -310,6 +355,13 @@ function buildRiskPrompt(input: RiskAnalysisInput) {
     "",
     "OCR text:",
     input.ocrText || "No OCR text available.",
+    "",
+    "OCR consistency checks:",
+    `- documentHasWallet: ${ocrConsistency.hasDocumentWallet}`,
+    `- documentHasAmount: ${ocrConsistency.hasDocumentAmount}`,
+    `- walletMatchesEnteredPayment: ${ocrConsistency.walletMatchesPayment ?? "unknown"}`,
+    `- amountMatchesEnteredPayment: ${ocrConsistency.amountMatchesPayment ?? "unknown"}`,
+    `- deterministicFindings: ${ocrConsistency.reasons.join(" | ") || "none"}`,
     "",
     "Local trusted recipient RAG result:",
     `- recommendation: ${input.recipientMatch?.recommendation ?? "no-match"}`,
@@ -326,11 +378,56 @@ function buildRiskPrompt(input: RiskAnalysisInput) {
 function normalizeVerdict(verdict: RiskVerdict, input: RiskAnalysisInput): RiskVerdict {
   const modelScore = Math.max(0, Math.min(100, Math.round(verdict.riskScore)));
   const hasSuspiciousText = containsSuspiciousPaymentLanguage(input);
+  const ocrConsistency = analyzeOcrConsistency(input);
   const recommendation = input.recipientMatch?.recommendation ?? "no-match";
   const isManualUnknownPayment =
     !input.ocrText?.trim() &&
     recommendation === "no-match" &&
     Boolean(input.payment.recipientWallet);
+
+  if (ocrConsistency.hasBlockingMismatch) {
+    const verdictKind = hasSuspiciousText ? "Block" : "Review";
+
+    return {
+      verdict: verdictKind,
+      riskScore: Math.max(modelScore, hasSuspiciousText ? 85 : 70),
+      recommendedRoute: hasSuspiciousText ? "Block" : "Guarded Payment",
+      reasons: normalizeReasons([
+        ...ocrConsistency.reasons,
+        ...verdict.reasons
+      ]),
+      summary: hasSuspiciousText
+        ? "The document conflicts with the entered payment and contains suspicious context, so this payment should not be signed."
+        : "The uploaded document does not match the entered payment fields, so a guarded payment is safer than direct send."
+    };
+  }
+
+  if (hasSuspiciousText) {
+    return {
+      verdict: "Block",
+      riskScore: Math.max(modelScore, 85),
+      recommendedRoute: "Block",
+      reasons: normalizeReasons([
+        "Payment context contains scam-like urgency or wallet safety language.",
+        ...verdict.reasons
+      ]),
+      summary: "This payment contains suspicious scam-like context and should not be signed."
+    };
+  }
+
+  if (ocrConsistency.hasIncompleteDocument) {
+    return {
+      verdict: "Review",
+      riskScore: Math.max(modelScore, 50),
+      recommendedRoute: "Guarded Payment",
+      reasons: normalizeReasons([
+        ...ocrConsistency.reasons,
+        ...verdict.reasons
+      ]),
+      summary:
+        "The uploaded document is missing payment details needed for a full match, so this payment should be reviewed before signing."
+    };
+  }
 
   if (recommendation === "trusted-match" && !hasSuspiciousText) {
     return {
@@ -469,6 +566,117 @@ function containsSuspiciousPaymentLanguage(input: RiskAnalysisInput) {
     "final warning",
     "account suspended"
   ].some((phrase) => text.includes(phrase));
+}
+
+function analyzeOcrConsistency(input: RiskAnalysisInput) {
+  const ocrText = input.ocrText?.trim() ?? "";
+  const enteredWallet = input.payment.recipientWallet?.trim() ?? "";
+  const enteredAmount = normalizeAmount(input.payment.amount);
+  const documentWallets = [
+    ...uniqueMatches(ocrText, /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g),
+    ...uniqueMatches(ocrText, /\b[A-Za-z0-9]{32,50}\b/g)
+  ].filter((wallet, index, wallets) => wallets.indexOf(wallet) === index);
+  const documentAmounts = extractOcrPaymentAmounts(ocrText)
+    .map(normalizeAmount)
+    .filter((amount): amount is string => Boolean(amount));
+  const walletMatchesPayment = documentWallets.length
+    ? documentWallets.some((wallet) => wallet === enteredWallet)
+    : null;
+  const amountMatchesPayment = documentAmounts.length && enteredAmount
+    ? documentAmounts.some((amount) => amount === enteredAmount)
+    : documentAmounts.length
+      ? false
+      : null;
+  const reasons: string[] = [];
+
+  if (!ocrText) {
+    return {
+      amountMatchesPayment: null,
+      hasBlockingMismatch: false,
+      hasDocumentAmount: false,
+      hasDocumentWallet: false,
+      hasIncompleteDocument: false,
+      reasons,
+      walletMatchesPayment: null
+    };
+  }
+
+  if (!documentWallets.length) {
+    reasons.push("Uploaded document does not show a recipient wallet to verify.");
+  } else if (!walletMatchesPayment) {
+    reasons.push("Uploaded document wallet does not match the entered recipient wallet.");
+  } else {
+    reasons.push("Uploaded document wallet matches the entered recipient wallet.");
+  }
+
+  if (!documentAmounts.length) {
+    reasons.push("Uploaded document does not show an amount to verify.");
+  } else if (!amountMatchesPayment) {
+    reasons.push("Uploaded document amount does not match the entered payment amount.");
+  } else {
+    reasons.push("Uploaded document amount matches the entered payment amount.");
+  }
+
+  return {
+    amountMatchesPayment,
+    hasBlockingMismatch: walletMatchesPayment === false || amountMatchesPayment === false,
+    hasDocumentAmount: documentAmounts.length > 0,
+    hasDocumentWallet: documentWallets.length > 0,
+    hasIncompleteDocument: !documentWallets.length || !documentAmounts.length,
+    reasons,
+    walletMatchesPayment
+  };
+}
+
+function normalizeAmount(value?: string) {
+  const match = value
+    ?.replace(/,/g, "")
+    .match(/\d+(?:\.\d{1,8})?/);
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[0]);
+
+  if (!Number.isFinite(amount)) {
+    return null;
+  }
+
+  return amount.toFixed(6).replace(/\.?0+$/, "");
+}
+
+function extractOcrPaymentAmounts(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const amounts = new Set<string>();
+  const amountPattern = /(?:[$€£]\s*)?\b\d+(?:,\d{3})*(?:\.\d{2,8})?\b\s*(?:USDT|USDC|USD|EUR|NGN)?/gi;
+
+  lines.forEach((line, index) => {
+    const previousLine = lines[index - 1] ?? "";
+    const nextLine = lines[index + 1] ?? "";
+    const isAmountContext =
+      /\b(amount|total|due|pay|price|balance)\b/i.test(line) ||
+      /\b(amount|total|due|pay|price|balance)\b/i.test(previousLine) ||
+      /\b(amount|total|due|pay|price|balance)\b/i.test(nextLine) ||
+      /[$€£]|\b(USDC|USDT|USD|EUR|NGN)\b/i.test(line);
+
+    if (!isAmountContext) {
+      return;
+    }
+
+    for (const match of line.matchAll(amountPattern)) {
+      amounts.add(match[0].trim());
+    }
+  });
+
+  return [...amounts];
+}
+
+function uniqueMatches(text: string, regex: RegExp) {
+  return [...new Set([...text.matchAll(regex)].map((match) => match[0].trim()))];
 }
 
 async function importQvacSdk() {

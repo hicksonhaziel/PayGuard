@@ -512,7 +512,9 @@ function buildPaymentDecision(
     walletAddress: request.payment.recipientWallet || "Unknown wallet",
     recipientName:
       request.savedRecipientName ||
-      recipientMatch?.bestMatch?.recipientName ||
+      (recipientMatch?.recommendation === "trusted-match"
+        ? recipientMatch.bestMatch?.recipientName
+        : null) ||
       request.ocrRecipientName ||
       "Unknown recipient",
     memo: request.payment.memo || "",
