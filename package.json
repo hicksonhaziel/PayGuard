@@ -10,7 +10,8 @@
     "build": "npm run build -w apps/qvac-agent && npm run build -w apps/desktop",
     "dev": "concurrently -k \"npm run dev:web\" \"npm run dev:desktop\"",
     "dev:web": "npm run dev -w apps/web",
-    "dev:desktop": "npm run build -w apps/qvac-agent && npm run dev -w apps/desktop"
+    "dev:desktop": "npm run build -w apps/qvac-agent && npm run dev -w apps/desktop",
+    "package:desktop": "npm run package:linux -w apps/desktop"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.4",
@@ -21,6 +22,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
     "electronmon": "^2.0.4",
     "next": "^16.2.4",
     "react": "^19.2.5",

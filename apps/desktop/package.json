@@ -1,6 +1,8 @@
 {
   "name": "@payguard/desktop",
   "version": "0.1.0",
+  "description": "Local-first QVAC payment safety layer for Solana stablecoins.",
+  "author": "PayGuard",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -10,7 +12,31 @@
     "dev": "concurrently -k \"npm run dev:renderer\" \"npm run dev:electron\" \"npm run dev:app\"",
     "dev:app": "wait-on tcp:127.0.0.1:5174 dist-electron/main.js dist-electron/preload.js && electronmon dist-electron/main.js",
     "dev:electron": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
-    "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort"
+    "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "package:linux": "npm run build && electron-builder --linux AppImage --publish never"
+  },
+  "build": {
+    "appId": "com.payguard.qvac",
+    "productName": "QVAC PayGuard",
+    "electronVersion": "41.3.0",
+    "npmRebuild": false,
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "assets/**/*",
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Finance",
+      "icon": "assets/icon.png"
+    }
   },
   "dependencies": {
     "@payguard/qvac-agent": "*",
