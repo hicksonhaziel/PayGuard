@@ -5,14 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "npm run build && node dist/index.js",
-    "smoke:qvac:registry": "npm run build && node dist/smoke-model-registry.js",
-    "smoke:qvac:ocr": "npm run build && node dist/smoke-ocr.js",
-    "smoke:qvac:llm": "npm run build && node dist/smoke-llm.js",
-    "smoke:qvac:rag": "npm run build && node dist/smoke-rag.js",
-    "smoke:qvac:stt": "npm run build && node dist/smoke-stt.js",
-    "smoke:qvac:tts": "npm run build && node dist/smoke-tts.js"
+    "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@qvac/sdk": "^0.10.0"

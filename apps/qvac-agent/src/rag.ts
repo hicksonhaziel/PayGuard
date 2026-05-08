@@ -45,6 +45,7 @@ export type RecipientRagResult = {
   reasons: string[];
 };
 
+// Demo fallback records keep the agent usable before a wallet has local history.
 const defaultTrustedRecipients: TrustedRecipientRecord[] = [
   {
     name: "Acme Store",
@@ -108,6 +109,7 @@ export async function matchPaymentRecipientWithRag(
       }
     });
 
+    // Each trusted recipient becomes a compact local document for QVAC embeddings.
     const documents = trustedRecipients.map(formatTrustedRecipient);
 
     await ragIngest({
@@ -130,6 +132,7 @@ export async function matchPaymentRecipientWithRag(
       content: result.content,
       recipientName: extractRecipientName(result.content)
     }));
+    // Exact wallet matches outrank semantic similarity; signing safety depends on keys.
     const exactWalletMatch = findExactWalletMatch(trustedRecipients, input.recipientWallet);
     const rankedMatches: RecipientRagMatch[] = exactWalletMatch
       ? [

@@ -67,18 +67,6 @@ This builds both:
 - `apps/qvac-agent`
 - `apps/desktop`
 
-## Useful QVAC Smoke Tests
-
-Run these from `apps/qvac-agent`:
-
-```bash
-npm run smoke:qvac:ocr -- ocrtest.png
-npm run smoke:qvac:rag
-npm run smoke:qvac:llm
-```
-
-The OCR smoke test is useful for validating local image extraction before demo.
-
 ## Devnet Wallet And Token Setup
 
 PayGuard signs through the user's browser wallet. For devnet testing:

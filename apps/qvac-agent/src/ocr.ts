@@ -26,6 +26,7 @@ export type QvacOcrResult = {
   stats: unknown;
 };
 
+// Runs QVAC OCR locally; the document text is never sent to a remote service.
 export async function analyzeDocumentWithOcr(imagePath: string): Promise<QvacOcrResult> {
   if (!existsSync(imagePath)) {
     throw new Error(`Image not found: ${imagePath}`);
@@ -86,6 +87,7 @@ export async function analyzeDocumentWithOcr(imagePath: string): Promise<QvacOcr
   }
 }
 
+// Lightweight hints used by PayGuard to compare the invoice against manual fields.
 export function extractOcrHints(text: string): QvacOcrHintSet {
   return {
     amounts: uniqueMatches(

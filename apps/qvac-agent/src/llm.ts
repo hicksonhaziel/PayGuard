@@ -21,6 +21,7 @@ export type RiskAnalysisInput = {
   recipientMatch?: RecipientRagResult | null;
 };
 
+// QVAC LLM must return structured output so the UI can route payments deterministically.
 const riskVerdictSchema = {
   type: "object",
   properties: {
@@ -67,6 +68,7 @@ export async function analyzePaymentRiskWithLlm(
       onProgress: (_progress: ModelProgressUpdate) => {}
     });
 
+    // The model explains risk, then normalizeVerdict applies hard product safety rules.
     const run = completion({
       modelId,
       stream: true,
@@ -340,6 +342,7 @@ function createRuleBasedFallbackVerdict(input: RiskAnalysisInput): RiskVerdict {
   };
 }
 
+// Keep the prompt factual: manual fields are intent, OCR/RAG are verification context.
 function buildRiskPrompt(input: RiskAnalysisInput) {
   const bestMatch = input.recipientMatch?.bestMatch;
   const ocrConsistency = analyzeOcrConsistency(input);
@@ -568,6 +571,7 @@ function containsSuspiciousPaymentLanguage(input: RiskAnalysisInput) {
   ].some((phrase) => text.includes(phrase));
 }
 
+// Deterministic guardrail for OCR evidence before trusting model judgement.
 function analyzeOcrConsistency(input: RiskAnalysisInput) {
   const ocrText = input.ocrText?.trim() ?? "";
   const enteredWallet = input.payment.recipientWallet?.trim() ?? "";
