@@ -1,8 +1,11 @@
 import path from "node:path";
 import http from "node:http";
-import { existsSync } from "node:fs";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
 import { readFileSync } from "node:fs";
 import {
   Connection,
@@ -34,6 +37,7 @@ import {
   type StoredPaymentHistory
 } from "./local-store.js";
 
+const nodeRequire = createRequire(__filename);
 const devServerUrl = "http://127.0.0.1:5174";
 const appIconPath = path.join(__dirname, "../assets/icon.png");
 const supportedOcrExtensions = new Set([".png", ".jpg", ".jpeg"]);
@@ -119,16 +123,33 @@ let walletBridgeServer: http.Server | null = null;
 let walletBridgeTimeout: NodeJS.Timeout | null = null;
 let mainWindow: BrowserWindow | null = null;
 const balanceCache = new Map<string, CachedWalletBalances>();
-const solanaWeb3BrowserBundle = readFileSync(
-  path.join(__dirname, "../../../node_modules/@solana/web3.js/lib/index.iife.min.js"),
-  "utf8"
-);
+
+function readSolanaWeb3BrowserBundle() {
+  const bundlePath = "node_modules/@solana/web3.js/lib/index.iife.min.js";
+  const candidates = [
+    path.join(process.resourcesPath, "app", bundlePath),
+    path.join(__dirname, "..", bundlePath),
+    path.join(__dirname, "..", "..", bundlePath),
+    path.join(__dirname, "..", "..", "..", bundlePath)
+  ];
+  const resolvedPath = candidates.find((candidate) => existsSync(candidate));
+
+  if (!resolvedPath) {
+    throw new Error("Unable to locate @solana/web3.js browser bundle.");
+  }
+
+  return readFileSync(resolvedPath, "utf8");
+}
+
+const solanaWeb3BrowserBundle = readSolanaWeb3BrowserBundle();
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 if (!singleInstanceLock) {
   app.quit();
 }
+
+Menu.setApplicationMenu(null);
 
 function getAppIcon() {
   const image = nativeImage.createFromPath(appIconPath);
@@ -146,6 +167,7 @@ function createWindow() {
     height: 780,
     minWidth: 980,
     minHeight: 680,
+    autoHideMenuBar: true,
     backgroundColor: "#07111f",
     icon: getAppIcon(),
     webPreferences: {
@@ -154,6 +176,7 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  window.setMenuBarVisibility(false);
 
   if (app.isPackaged) {
     window.loadFile(path.join(__dirname, "../dist/index.html"));
@@ -218,7 +241,7 @@ function registerWalletHandlers() {
     }
 
     const connectUrl = await startExternalWalletBridge(window);
-    await shell.openExternal(connectUrl);
+    await openWalletBridgeUrl(connectUrl);
 
     return { url: connectUrl };
   });
@@ -869,6 +892,60 @@ function buildWalletBridgeUrl(port: number, pathname: string) {
   return `http://${walletBridgeHost}:${port}${pathname}`;
 }
 
+function prepareQvacBareRuntime() {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const runtimeModulePath = nodeRequire.resolve("bare-runtime-linux-x64");
+  const packagedRuntime = nodeRequire("bare-runtime-linux-x64") as { bare?: string };
+  const packagedBarePath = packagedRuntime.bare;
+
+  if (!packagedBarePath || !existsSync(packagedBarePath)) {
+    return;
+  }
+
+  const runtimeDir = path.join(app.getPath("userData"), "qvac-runtime", "bare-runtime-linux-x64", "bin");
+  const writableBarePath = path.join(runtimeDir, "bare");
+
+  mkdirSync(runtimeDir, { recursive: true });
+  copyFileSync(packagedBarePath, writableBarePath);
+  chmodSync(writableBarePath, 0o755);
+
+  packagedRuntime.bare = writableBarePath;
+  const cachedRuntimeModule = nodeRequire.cache[runtimeModulePath];
+
+  if (cachedRuntimeModule) {
+    cachedRuntimeModule.exports.bare = writableBarePath;
+  }
+}
+
+async function openWalletBridgeUrl(url: string) {
+  if (process.platform !== "linux") {
+    await shell.openExternal(url);
+    return;
+  }
+
+  const realHome = os.userInfo().homedir || process.env.HOME;
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("xdg-open", [url], {
+      env: {
+        ...process.env,
+        ...(realHome ? { HOME: realHome } : {})
+      },
+      detached: true,
+      stdio: "ignore"
+    });
+
+    child.once("error", reject);
+    child.once("spawn", resolve);
+    child.unref();
+  }).catch(async () => {
+    await shell.openExternal(url);
+  });
+}
+
 async function startExternalDirectSendBridge(
   window: BrowserWindow,
   input: DirectSendInput
@@ -945,7 +1022,7 @@ async function startExternalDirectSendBridge(
           void closeWalletBridge();
         }, 180000);
 
-        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+        void openWalletBridgeUrl(buildWalletBridgeUrl(port, "/sign"));
       })
       .catch(reject);
   });
@@ -1050,7 +1127,7 @@ async function startExternalGuardedPaymentBridge(
           void closeWalletBridge();
         }, 180000);
 
-        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+        void openWalletBridgeUrl(buildWalletBridgeUrl(port, "/sign"));
       })
       .catch(reject);
   });
@@ -1164,7 +1241,7 @@ async function startExternalGuardedActionBridge(
           void closeWalletBridge();
         }, 180000);
 
-        void shell.openExternal(buildWalletBridgeUrl(port, "/sign"));
+        void openWalletBridgeUrl(buildWalletBridgeUrl(port, "/sign"));
       })
       .catch(reject);
   });
@@ -2075,6 +2152,7 @@ function escapeHtml(value: string) {
 app.whenReady().then(() => {
   app.setName("PayGuard");
   app.setAppUserModelId("com.payguard.desktop");
+  prepareQvacBareRuntime();
   registerQvacHandlers();
   registerWalletHandlers();
   registerLocalStoreHandlers();
