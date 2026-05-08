@@ -10,8 +10,7 @@
     "build": "npm run build -w apps/qvac-agent && npm run build -w apps/desktop",
     "dev": "concurrently -k \"npm run dev:web\" \"npm run dev:desktop\"",
     "dev:web": "npm run dev -w apps/web",
-    "dev:desktop": "npm run build -w apps/qvac-agent && npm run dev -w apps/desktop",
-    "check:structure": "node scripts/check-structure.mjs"
+    "dev:desktop": "npm run build -w apps/qvac-agent && npm run dev -w apps/desktop"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.4",

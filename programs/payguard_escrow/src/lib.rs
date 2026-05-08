@@ -14,7 +14,9 @@ use spl_token::state::Mint;
 
 solana_program::declare_id!("CzQ6EYC8PBwLC5QsrAcrjeEQKJzbcLWZfTta7Qi8MZKZ");
 
+// Escrow PDA: ["payguard-escrow", sender, escrow_id].
 const ESCROW_SEED: &[u8] = b"payguard-escrow";
+// Fixed account layout used by the Electron client for guarded discovery.
 const STATE_LEN: usize = 1 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 1;
 const STATUS_FUNDED: u8 = 1;
 const STATUS_CANCELLED: u8 = 2;
@@ -65,6 +67,7 @@ fn process_create_guarded_payment(
 
     let (expected_escrow, bump) = derive_escrow(program_id, sender.key, &escrow_id);
 
+    // Only the PDA for this sender and escrow id can hold the escrow state.
     if expected_escrow != *escrow.key {
         return Err(ProgramError::InvalidSeeds);
     }
@@ -79,6 +82,7 @@ fn process_create_guarded_payment(
         return Err(PayguardEscrowError::InvalidUnlockTime.into());
     }
 
+    // The program owns the escrow state account; the token vault is an ATA owned by this PDA.
     let rent = Rent::get()?;
     let lamports = rent.minimum_balance(STATE_LEN);
     let escrow_id_seed = escrow_id.as_ref();
@@ -157,6 +161,7 @@ fn process_cancel_guarded_payment(_program_id: &Pubkey, accounts: &[AccountInfo]
         return Err(PayguardEscrowError::Unauthorized.into());
     }
 
+    // Client supplies the vault and mint; verify they match the stored escrow.
     if state.vault_token != *vault_token.key || state.mint != *mint.key {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -167,6 +172,7 @@ fn process_cancel_guarded_payment(_program_id: &Pubkey, accounts: &[AccountInfo]
         return Err(PayguardEscrowError::AlreadyUnlocked.into());
     }
 
+    // Before unlock, only the sender can recover funds from the PDA-owned vault.
     transfer_from_vault(
         &state,
         escrow,
@@ -203,6 +209,7 @@ fn process_claim_guarded_payment(_program_id: &Pubkey, accounts: &[AccountInfo])
         return Err(PayguardEscrowError::Unauthorized.into());
     }
 
+    // Claim uses the same vault and mint recorded when the guarded payment was created.
     if state.vault_token != *vault_token.key || state.mint != *mint.key {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -213,6 +220,7 @@ fn process_claim_guarded_payment(_program_id: &Pubkey, accounts: &[AccountInfo])
         return Err(PayguardEscrowError::NotUnlocked.into());
     }
 
+    // After unlock, only the intended recipient can release funds.
     transfer_from_vault(
         &state,
         escrow,
@@ -236,6 +244,7 @@ fn transfer_from_vault<'a>(
 ) -> ProgramResult {
     let mint_data = Mint::unpack(&mint.data.borrow())?;
     let escrow_id_seed = state.escrow_id.as_ref();
+    // The escrow PDA signs token transfers as the vault authority.
     let signer_seeds: &[&[u8]] = &[
         ESCROW_SEED,
         state.sender.as_ref(),
@@ -269,6 +278,7 @@ fn derive_escrow(program_id: &Pubkey, sender: &Pubkey, escrow_id: &[u8; 32]) -> 
     Pubkey::find_program_address(&[ESCROW_SEED, sender.as_ref(), escrow_id], program_id)
 }
 
+// Create instruction data: amount u64, unlock_at i64, escrow_id [u8; 32].
 fn unpack_create_data(data: &[u8]) -> Result<(u64, i64, [u8; 32]), ProgramError> {
     if data.len() != 48 {
         return Err(ProgramError::InvalidInstructionData);
@@ -285,6 +295,7 @@ fn unpack_create_data(data: &[u8]) -> Result<(u64, i64, [u8; 32]), ProgramError>
     Ok((amount, unlock_at, escrow_id))
 }
 
+// Serialized manually to keep the on-chain account small and client decoding stable.
 struct EscrowState {
     status: u8,
     sender: Pubkey,
