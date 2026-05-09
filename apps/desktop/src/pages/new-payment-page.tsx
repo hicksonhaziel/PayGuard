@@ -590,7 +590,7 @@ function UploadCard({ onFileSelected }: UploadCardProps) {
       onDrop={handleDrop}
     >
       <input
-        accept="image/png,image/jpeg,image/jpg,application/pdf"
+        accept="image/png,image/jpeg,image/jpg"
         className="sr-only"
         onChange={handleInputChange}
         type="file"
@@ -607,7 +607,7 @@ function UploadCard({ onFileSelected }: UploadCardProps) {
           <span className="font-semibold text-[#030813] underline dark:text-white">
             browse
           </span>
-          . PNG, JPG, PDF up to 10MB.
+          . PNG or JPG up to 10MB.
         </p>
       </div>
     </label>

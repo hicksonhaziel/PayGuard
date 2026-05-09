@@ -1,6 +1,6 @@
 # QVAC PayGuard Architecture
 
-QVAC PayGuard is a local-first Electron desktop app that checks payment context before a Solana wallet signs. The app combines local QVAC analysis with real Solana stablecoin transactions and a devnet guarded-payment escrow program.
+QVAC PayGuard is a local-first Electron desktop app that checks payment context before a Solana wallet signs. The app combines local QVAC OCR/RAG/LLM/TTS analysis with real Solana stablecoin transactions and a devnet guarded-payment escrow program.
 
 ## High-Level Flow
 
@@ -8,6 +8,7 @@ QVAC PayGuard is a local-first Electron desktop app that checks payment context 
 User payment intent
   -> manual fields + optional invoice/screenshot
   -> local QVAC OCR/RAG/LLM analysis
+  -> QVAC TTS spoken verdict
   -> verdict and route recommendation
   -> browser wallet signing
   -> Solana direct transfer or guarded escrow
@@ -57,6 +58,7 @@ Responsibilities:
 - QVAC OCR for uploaded invoices/screenshots
 - local embedding/RAG search over trusted recipients
 - local LLM risk reasoning
+- QVAC TTS spoken verdict generation
 - deterministic safety normalization around LLM output
 
 Important files:
@@ -70,6 +72,9 @@ rag.ts
 
 llm.ts
   Produces risk verdicts and applies safety guardrails.
+
+tts.ts
+  Synthesizes a short spoken verdict from the normalized route decision.
 ```
 
 ### `programs/payguard_escrow`
@@ -150,6 +155,7 @@ Manual payment fields
   -> QVAC RAG trusted-recipient matching
   -> QVAC LLM risk verdict
   -> deterministic route normalization
+  -> QVAC TTS spoken verdict
   -> Verdict screen
 ```
 
@@ -204,6 +210,16 @@ It returns:
 - summary
 
 PayGuard then normalizes the model output with deterministic safety rules. This keeps critical cases predictable even if model wording varies.
+
+### TTS role
+
+After normalization, QVAC TTS turns the final decision into a short spoken line:
+
+```text
+Verdict: Safe. Recommended route: Direct Send.
+```
+
+The spoken verdict is a local demo-facing confirmation step. If TTS synthesis fails or the model has not been cached yet, the renderer falls back to the browser speech engine and the payment flow continues.
 
 ## Verdict And Routing
 
@@ -371,4 +387,3 @@ PayGuard does not:
 - Local RAG quality depends on saved recipient/history data.
 - Escrow accounts are not rent-closed after claim/cancel.
 - Browser tab close/focus behavior varies by OS and browser.
-

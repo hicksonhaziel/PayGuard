@@ -26,7 +26,9 @@ import {
   matchPaymentRecipientWithRag,
   type PaymentRagInput,
   type PaymentRagRequest,
-  type RiskAnalysisInput
+  synthesizeSpokenVerdict,
+  type RiskAnalysisInput,
+  type RiskVerdict
 } from "@payguard/qvac-agent";
 import {
   addPaymentHistory,
@@ -229,6 +231,14 @@ function registerQvacHandlers() {
     }
 
     return analyzePaymentRiskWithLlm(input);
+  });
+
+  ipcMain.handle("qvac:synthesize-spoken-verdict", async (_event, input: unknown) => {
+    if (!isRiskVerdict(input)) {
+      throw new Error("Valid payment verdict is required for QVAC TTS.");
+    }
+
+    return synthesizeSpokenVerdict(input);
   });
 }
 
@@ -684,6 +694,27 @@ function isRiskAnalysisInput(input: unknown): input is RiskAnalysisInput {
   return (
     isPaymentRagInput(candidate.payment) &&
     (candidate.ocrText === undefined || typeof candidate.ocrText === "string")
+  );
+}
+
+function isRiskVerdict(input: unknown): input is RiskVerdict {
+  if (!input || typeof input !== "object") {
+    return false;
+  }
+
+  const candidate = input as Record<string, unknown>;
+
+  return (
+    (candidate.verdict === "Safe" ||
+      candidate.verdict === "Review" ||
+      candidate.verdict === "Block") &&
+    typeof candidate.riskScore === "number" &&
+    (candidate.recommendedRoute === "Direct Send" ||
+      candidate.recommendedRoute === "Guarded Payment" ||
+      candidate.recommendedRoute === "Block") &&
+    Array.isArray(candidate.reasons) &&
+    candidate.reasons.every((reason) => typeof reason === "string") &&
+    typeof candidate.summary === "string"
   );
 }
 

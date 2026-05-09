@@ -253,4 +253,4 @@ npm run build -w apps/qvac-agent
 npm run dev:desktop
 ```
 
-This is the most stable path for recording because it avoids OS-specific AppImage behavior while still showing the real Electron app, wallet bridge, QVAC OCR/RAG/LLM flow, direct payments, and guarded payments.
+This is the most stable path for recording because it avoids OS-specific AppImage behavior while still showing the real Electron app, wallet bridge, QVAC OCR/RAG/LLM/TTS flow, direct payments, and guarded payments.

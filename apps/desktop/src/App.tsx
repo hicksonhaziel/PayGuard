@@ -59,7 +59,7 @@ export type PaymentAnalysisRequest = {
   savedRecipientName: string | null;
   trustedRecipients: TrustedRecipientRecord[];
 };
-export type AnalysisStepKey = "ocr" | "rag" | "llm" | "explanation";
+export type AnalysisStepKey = "ocr" | "rag" | "llm" | "tts" | "explanation";
 
 const screenOrder: Record<AppScreen, number> = {
   home: 0,
@@ -194,6 +194,9 @@ export default function App() {
         ocrText: resolvedRequest.ocrText,
         recipientMatch
       });
+
+      setAnalysisStep("tts");
+      await speakVerdict(verdict);
 
       setAnalysisStep("explanation");
       await waitForMinimumStepVisibility();
@@ -433,6 +436,42 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+async function speakVerdict(verdict: RiskVerdict) {
+  const spokenText = `Verdict: ${verdict.verdict}. Recommended route: ${verdict.recommendedRoute}.`;
+
+  try {
+    if (!window.payguardDesktop?.synthesizeSpokenVerdict) {
+      speakWithBrowserFallback(spokenText);
+      return;
+    }
+
+    const audio = await window.payguardDesktop.synthesizeSpokenVerdict(verdict);
+    await playBase64Audio(audio.audioBase64, audio.mimeType);
+  } catch (error) {
+    console.warn("QVAC spoken verdict failed; using browser speech fallback.", error);
+    speakWithBrowserFallback(spokenText);
+  }
+}
+
+function playBase64Audio(audioBase64: string, mimeType: string) {
+  const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+  audio.volume = 1;
+
+  return audio.play();
+}
+
+function speakWithBrowserFallback(text: string) {
+  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
 }
 
 function resolveAnalysisRequestFromOcr(

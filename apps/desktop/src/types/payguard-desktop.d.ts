@@ -96,6 +96,12 @@ declare global {
     payguardDesktop?: {
       analyzeDocumentWithOcr: (imagePath: string) => Promise<QvacOcrResult>;
       analyzePaymentRisk: (input: RiskAnalysisInput) => Promise<RiskVerdict>;
+      synthesizeSpokenVerdict: (input: RiskVerdict) => Promise<{
+        audioBase64: string;
+        mimeType: "audio/wav";
+        sampleRate: number;
+        spokenText: string;
+      }>;
       getPathForFile: (file: File) => string;
       getWalletBalances: (input: {
         network: "mainnet-beta" | "devnet";

@@ -18,3 +18,8 @@ export {
   type RiskAnalysisInput,
   type RiskVerdict
 } from "./llm.js";
+export {
+  formatSpokenVerdict,
+  synthesizeSpokenVerdict,
+  type SpokenVerdictResult
+} from "./tts.js";
