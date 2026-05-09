@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("payguardDesktop", {
     ipcRenderer.invoke("qvac:analyze-payment-risk", input),
   synthesizeSpokenVerdict: (input: unknown) =>
     ipcRenderer.invoke("qvac:synthesize-spoken-verdict", input),
+  speakVerdictWithSystemVoice: (text: string) =>
+    ipcRenderer.invoke("qvac:speak-verdict-system", text),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   matchRecipientWithRag: (input: unknown) =>
     ipcRenderer.invoke("qvac:match-recipient-rag", input),

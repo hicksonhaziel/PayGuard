@@ -102,6 +102,10 @@ declare global {
         sampleRate: number;
         spokenText: string;
       }>;
+      speakVerdictWithSystemVoice: (text: string) => Promise<{
+        ok: true;
+        engine: string;
+      }>;
       getPathForFile: (file: File) => string;
       getWalletBalances: (input: {
         network: "mainnet-beta" | "devnet";

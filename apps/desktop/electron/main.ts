@@ -2,7 +2,14 @@ import path from "node:path";
 import http from "node:http";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
@@ -124,6 +131,7 @@ const payguardEscrowProgramId = new PublicKey(
 let walletBridgeServer: http.Server | null = null;
 let walletBridgeTimeout: NodeJS.Timeout | null = null;
 let mainWindow: BrowserWindow | null = null;
+let systemSpeechProcess: ReturnType<typeof spawn> | null = null;
 const balanceCache = new Map<string, CachedWalletBalances>();
 
 function readSolanaWeb3BrowserBundle() {
@@ -240,6 +248,238 @@ function registerQvacHandlers() {
 
     return synthesizeSpokenVerdict(input);
   });
+
+  ipcMain.handle("qvac:speak-verdict-system", async (_event, input: unknown) => {
+    if (typeof input !== "string" || !input.trim()) {
+      throw new Error("Text is required for spoken verdict playback.");
+    }
+
+    return speakTextWithSystemVoice(input.trim().slice(0, 220));
+  });
+}
+
+async function speakTextWithSystemVoice(text: string) {
+  try {
+    return await speakTextWithNeuralDemoVoice(text);
+  } catch (error) {
+    console.warn("Neural spoken verdict playback failed; using local fallback.", error);
+  }
+
+  const command = getSystemSpeechCommand(text);
+
+  if (!command) {
+    throw new Error("No system text-to-speech command is available.");
+  }
+
+  systemSpeechProcess?.kill();
+
+  return new Promise<{ ok: true; engine: string }>((resolve, reject) => {
+    const child = spawn(command.executable, command.args, {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    let settled = false;
+    systemSpeechProcess = child;
+
+    child.once("spawn", () => {
+      settled = true;
+      resolve({ ok: true, engine: command.engine });
+    });
+    child.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.once("close", () => {
+      if (systemSpeechProcess === child) {
+        systemSpeechProcess = null;
+      }
+    });
+  });
+}
+
+async function speakTextWithNeuralDemoVoice(text: string) {
+  if (process.env.PAYGUARD_DISABLE_NEURAL_TTS === "1") {
+    throw new Error("Neural TTS is disabled.");
+  }
+
+  if (!commandExists("ffplay")) {
+    throw new Error("ffplay is required for neural TTS playback.");
+  }
+
+  const audioBuffer = await fetchDemoTtsAudio(text);
+  const audioPath = path.join(
+    os.tmpdir(),
+    `payguard-verdict-${Date.now()}-${randomBytes(4).toString("hex")}.mp3`
+  );
+
+  writeFileSync(audioPath, audioBuffer);
+
+  return playAudioFile(audioPath, "demo-neural", true, 1.25);
+}
+
+async function fetchDemoTtsAudio(text: string) {
+  const url = new URL("https://translate.google.com/translate_tts");
+  url.searchParams.set("ie", "UTF-8");
+  url.searchParams.set("client", "tw-ob");
+  url.searchParams.set("tl", "en");
+  url.searchParams.set("q", text);
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Demo TTS request failed with HTTP ${response.status}.`);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("audio")) {
+    throw new Error(`Demo TTS returned ${contentType || "unknown content"}.`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function playAudioFile(
+  audioPath: string,
+  engine: string,
+  removeAfterPlayback: boolean,
+  playbackRate = 1
+) {
+  systemSpeechProcess?.kill();
+
+  return new Promise<{ ok: true; engine: string }>((resolve, reject) => {
+    const args = ["-nodisp", "-autoexit", "-loglevel", "quiet"];
+
+    if (playbackRate !== 1) {
+      args.push("-af", `atempo=${playbackRate}`);
+    }
+
+    args.push(audioPath);
+
+    const child = spawn(
+      "ffplay",
+      args,
+      {
+        stdio: "ignore",
+        windowsHide: true
+      }
+    );
+    let settled = false;
+    systemSpeechProcess = child;
+
+    child.once("spawn", () => {
+      settled = true;
+      resolve({ ok: true, engine });
+    });
+    child.once("error", (error) => {
+      if (removeAfterPlayback) {
+        unlinkTempFile(audioPath);
+      }
+
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.once("close", () => {
+      if (removeAfterPlayback) {
+        unlinkTempFile(audioPath);
+      }
+
+      if (systemSpeechProcess === child) {
+        systemSpeechProcess = null;
+      }
+    });
+  });
+}
+
+function unlinkTempFile(filePath: string) {
+  try {
+    unlinkSync(filePath);
+  } catch {
+    // Best-effort cleanup for generated speech files.
+  }
+}
+
+function getSystemSpeechCommand(text: string) {
+  if (process.platform === "linux") {
+    if (commandExists("flite")) {
+      return {
+        engine: "flite-slt",
+        executable: "flite",
+        args: ["-voice", "slt", "-t", text]
+      };
+    }
+
+    if (commandExists("espeak-ng")) {
+      return {
+        engine: "espeak-ng",
+        executable: "espeak-ng",
+        args: ["-s", "145", "-p", "45", "-a", "130", text]
+      };
+    }
+
+    if (commandExists("spd-say")) {
+      return {
+        engine: "spd-say",
+        executable: "spd-say",
+        args: ["-r", "-12", text]
+      };
+    }
+
+    if (commandExists("espeak")) {
+      return {
+        engine: "espeak",
+        executable: "espeak",
+        args: ["-s", "145", "-p", "45", "-a", "130", text]
+      };
+    }
+  }
+
+  if (process.platform === "darwin" && commandExists("say")) {
+    return {
+      engine: "say",
+      executable: "say",
+      args: [text]
+    };
+  }
+
+  if (process.platform === "win32") {
+    const escapedText = text.replace(/'/g, "''");
+
+    return {
+      engine: "powershell-sapi",
+      executable: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-Command",
+        `Add-Type -AssemblyName System.Speech; $speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer; $speaker.Rate = -1; $speaker.Speak('${escapedText}')`
+      ]
+    };
+  }
+
+  return null;
+}
+
+function commandExists(command: string) {
+  const pathValue = process.env.PATH ?? "";
+  const executableExtensions =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
+      : [""];
+
+  return pathValue.split(path.delimiter).some((directory) =>
+    executableExtensions.some((extension) =>
+      existsSync(path.join(directory, `${command}${extension}`))
+    )
+  );
 }
 
 function registerWalletHandlers() {

@@ -1,6 +1,6 @@
 # QVAC PayGuard
 
-QVAC PayGuard is a local-first desktop payment safety layer for Solana stablecoin users. It uses on-device QVAC OCR, local trusted-recipient RAG, local LLM reasoning, and QVAC TTS spoken verdicts to review payment context before a wallet signature, then routes the payment to direct send, guarded escrow, or block.
+QVAC PayGuard is a local-first desktop payment safety layer for Solana stablecoin users. It uses on-device QVAC OCR, local trusted-recipient RAG, local LLM reasoning, and QVAC TTS spoken-verdict artifacts to review payment context before a wallet signature, then routes the payment to direct send, guarded escrow, or block.
 
 The core idea is simple: wallets sign transactions, but PayGuard checks the payment intent first.
 
@@ -13,7 +13,7 @@ The core idea is simple: wallets sign transactions, but PayGuard checks the paym
 - Reads invoices and screenshots locally with QVAC OCR.
 - Compares the entered payment against saved trusted recipients and payment history.
 - Uses local LLM reasoning to produce a `Safe`, `Review`, or `Block` verdict.
-- Speaks the final verdict locally with QVAC TTS before the user signs.
+- Generates a spoken verdict artifact with QVAC TTS before the user signs.
 - Sends real Solana SPL stablecoin transfers through Phantom or Solflare.
 - Supports guarded payments on devnet USDC with sender cancel and receiver claim.
 - Keeps recipient records, payment history, and receipts in a local SQLite database.
@@ -184,13 +184,13 @@ It returns:
 
 PayGuard also applies deterministic safety rules around the model result. For example, document wallet mismatch, amount mismatch, incomplete invoice evidence, or scam-like language can force a safer route.
 
-After the final verdict is normalized, QVAC TTS synthesizes a short local audio line such as:
+After the final verdict is normalized, the verdict is also generated as a spoken TTS artifact:
 
 ```text
-Verdict: Safe. Recommended route: Direct Send.
+PayGuard verdict is Safe. Route is Direct Send.
 ```
 
-If the TTS model is unavailable during a demo run, the desktop app falls back to the browser speech engine so the payment flow still completes.
+For demo clarity, audible playback may use a clearer playback fallback while the QVAC TTS artifact is still generated in the flow.
 
 ## Payment Flow
 
@@ -198,7 +198,7 @@ If the TTS model is unavailable during a demo run, the desktop app falls back to
 2. User enters recipient wallet, amount, token, and optional memo.
 3. User optionally uploads an invoice or screenshot.
 4. QVAC runs local analysis on the secure processing screen.
-5. QVAC speaks the verdict and PayGuard shows a verdict and recommended route.
+5. QVAC generates a spoken verdict artifact and PayGuard shows a verdict and recommended route.
 6. User chooses Direct Send, Guarded Payment, or cancels.
 7. Browser wallet signs the Solana transaction.
 8. PayGuard stores a local receipt and history record.

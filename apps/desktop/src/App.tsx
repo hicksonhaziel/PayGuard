@@ -59,7 +59,7 @@ export type PaymentAnalysisRequest = {
   savedRecipientName: string | null;
   trustedRecipients: TrustedRecipientRecord[];
 };
-export type AnalysisStepKey = "ocr" | "rag" | "llm" | "tts" | "explanation";
+export type AnalysisStepKey = "ocr" | "rag" | "llm" | "explanation";
 
 const screenOrder: Record<AppScreen, number> = {
   home: 0,
@@ -73,6 +73,7 @@ const screenOrder: Record<AppScreen, number> = {
 };
 const walletStorageKey = "payguard-connected-wallet";
 const networkStorageKey = "payguard-solana-network";
+let spokenVerdictRequestId = 0;
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<AppScreen>("home");
@@ -194,9 +195,6 @@ export default function App() {
         ocrText: resolvedRequest.ocrText,
         recipientMatch
       });
-
-      setAnalysisStep("tts");
-      await speakVerdict(verdict);
 
       setAnalysisStep("explanation");
       await waitForMinimumStepVisibility();
@@ -408,6 +406,7 @@ export default function App() {
               onCancel={() => navigateTo("home")}
               onDirectSend={completeDirectSend}
               onGuardedPayment={chooseGuardedPayment}
+              onSpeakVerdict={speakVerdict}
             />
           ) : (
             <AnalyzeStatePage
@@ -439,39 +438,82 @@ export default function App() {
 }
 
 async function speakVerdict(verdict: RiskVerdict) {
-  const spokenText = `Verdict: ${verdict.verdict}. Recommended route: ${verdict.recommendedRoute}.`;
+  const spokenText = `PayGuard verdict is ${verdict.verdict}. Route is ${verdict.recommendedRoute}.`;
+  const requestId = (spokenVerdictRequestId += 1);
 
-  try {
-    if (!window.payguardDesktop?.synthesizeSpokenVerdict) {
-      speakWithBrowserFallback(spokenText);
-      return;
-    }
+  stopActiveSpokenVerdict();
 
-    const audio = await window.payguardDesktop.synthesizeSpokenVerdict(verdict);
-    await playBase64Audio(audio.audioBase64, audio.mimeType);
-  } catch (error) {
-    console.warn("QVAC spoken verdict failed; using browser speech fallback.", error);
+  if (window.payguardDesktop?.speakVerdictWithSystemVoice) {
+    window.payguardDesktop.speakVerdictWithSystemVoice(spokenText).catch((error) => {
+      if (requestId === spokenVerdictRequestId) {
+        console.warn("System spoken verdict playback failed.", error);
+        speakWithBrowserFallback(spokenText);
+      }
+    });
+  } else {
     speakWithBrowserFallback(spokenText);
   }
-}
 
-function playBase64Audio(audioBase64: string, mimeType: string) {
-  const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
-  audio.volume = 1;
+  if (!window.payguardDesktop?.synthesizeSpokenVerdict) {
+    return;
+  }
 
-  return audio.play();
+  void window.payguardDesktop.synthesizeSpokenVerdict(verdict).catch((error) => {
+    if (requestId === spokenVerdictRequestId) {
+      console.warn("QVAC TTS verdict synthesis failed.", error);
+    }
+  });
 }
 
 function speakWithBrowserFallback(text: string) {
+  stopActiveSpokenVerdict();
+
   if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
     return;
   }
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.95;
-  utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
+  const requestId = spokenVerdictRequestId;
+  let didSpeak = false;
+  const speak = () => {
+    if (didSpeak || requestId !== spokenVerdictRequestId) {
+      return;
+    }
+
+    didSpeak = true;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.92;
+    utterance.pitch = 1;
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice =
+      voices.find((voice) => voice.lang.startsWith("en") && voice.localService) ??
+      voices.find((voice) => voice.lang.startsWith("en"));
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  if (window.speechSynthesis.getVoices().length) {
+    speak();
+    return;
+  }
+
+  window.speechSynthesis.addEventListener(
+    "voiceschanged",
+    () => {
+      speak();
+    },
+    { once: true }
+  );
+  window.setTimeout(speak, 300);
+}
+
+function stopActiveSpokenVerdict() {
+  window.speechSynthesis?.cancel();
 }
 
 function resolveAnalysisRequestFromOcr(

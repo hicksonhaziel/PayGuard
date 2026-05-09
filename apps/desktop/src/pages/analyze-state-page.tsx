@@ -11,7 +11,6 @@ interface AnalyzeStatePageProps {
 const manualAnalysisSteps = [
   { key: "rag", label: "Loading local trusted recipient data..." },
   { key: "llm", label: "Performing risk analysis with local LLM..." },
-  { key: "tts", label: "Speaking verdict with QVAC TTS..." },
   { key: "explanation", label: "Generating explanation..." }
 ] as const;
 const documentAnalysisSteps = [

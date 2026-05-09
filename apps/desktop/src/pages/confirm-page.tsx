@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PaymentDecision } from "../App";
+
+const spokenVerdictKeys = new Set<string>();
 
 interface ConfirmPageProps {
   decision: PaymentDecision | null;
@@ -7,6 +9,7 @@ interface ConfirmPageProps {
   onCancel: () => void;
   onDirectSend: () => void;
   onGuardedPayment: (guardedHoldHours: number) => void;
+  onSpeakVerdict: (verdict: PaymentDecision["verdict"]) => Promise<void>;
 }
 
 export function ConfirmPage({
@@ -14,7 +17,8 @@ export function ConfirmPage({
   error,
   onCancel,
   onDirectSend,
-  onGuardedPayment
+  onGuardedPayment,
+  onSpeakVerdict
 }: ConfirmPageProps) {
   const displayDecision = decision ?? createFallbackDecision();
   const initialRoute =
@@ -44,6 +48,29 @@ export function ConfirmPage({
     onDirectSend,
     setSelectedRoute
   );
+  const spokenVerdictKey = [
+    displayDecision.walletAddress,
+    displayDecision.amount,
+    displayDecision.token,
+    displayVerdict.verdict,
+    displayVerdict.recommendedRoute,
+    displayVerdict.riskScore
+  ].join(":");
+  const lastSpokenVerdictKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !decision ||
+      lastSpokenVerdictKey.current === spokenVerdictKey ||
+      spokenVerdictKeys.has(spokenVerdictKey)
+    ) {
+      return;
+    }
+
+    lastSpokenVerdictKey.current = spokenVerdictKey;
+    spokenVerdictKeys.add(spokenVerdictKey);
+    void onSpeakVerdict(displayVerdict);
+  }, [decision, displayVerdict, onSpeakVerdict, spokenVerdictKey]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f7fafc] px-6 py-6 dark:bg-[#0f172a]">

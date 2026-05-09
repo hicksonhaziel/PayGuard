@@ -26,24 +26,24 @@ export async function synthesizeSpokenVerdict(
     const models = await importQvacSdk();
 
     modelId = await loadModel({
-      modelSrc: models.TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32,
-      modelType: "onnx-tts",
+      modelSrc: models.TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32.src,
+      modelType: "tts",
       modelConfig: {
         ttsEngine: "supertonic",
         language: "en",
-        ttsSpeed: 1,
+        ttsSpeed: 1.05,
         ttsNumInferenceSteps: 5,
         ttsSupertonicMultilingual: false,
-        ttsTextEncoderSrc: models.TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32,
+        ttsTextEncoderSrc: models.TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32.src,
         ttsDurationPredictorSrc:
-          models.TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32,
+          models.TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32.src,
         ttsVectorEstimatorSrc:
-          models.TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32,
-        ttsVocoderSrc: models.TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32,
+          models.TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32.src,
+        ttsVocoderSrc: models.TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32.src,
         ttsUnicodeIndexerSrc:
-          models.TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32,
-        ttsTtsConfigSrc: models.TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE,
-        ttsVoiceStyleSrc: models.TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE_6
+          models.TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32.src,
+        ttsTtsConfigSrc: models.TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE.src,
+        ttsVoiceStyleSrc: models.TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE.src
       },
       onProgress: (_progress: ModelProgressUpdate) => {}
     });
@@ -73,7 +73,7 @@ export async function synthesizeSpokenVerdict(
 }
 
 export function formatSpokenVerdict(verdict: RiskVerdict) {
-  return `Verdict: ${verdict.verdict}. Recommended route: ${verdict.recommendedRoute}.`;
+  return `PayGuard verdict is ${verdict.verdict}. Route is ${verdict.recommendedRoute}.`;
 }
 
 function encodeWav(samples: number[], sampleRate: number) {
@@ -95,7 +95,7 @@ function encodeWav(samples: number[], sampleRate: number) {
   buffer.writeUInt32LE(dataSize, 40);
 
   samples.forEach((sample, index) => {
-    const clamped = Math.max(-32768, Math.min(32767, Math.round(sample)));
+    const clamped = Math.max(-32768, Math.min(32767, Math.round(sample * 0.72)));
     buffer.writeInt16LE(clamped, 44 + index * 2);
   });
 
@@ -104,12 +104,12 @@ function encodeWav(samples: number[], sampleRate: number) {
 
 async function importQvacSdk() {
   return (await import("@qvac/sdk")) as typeof import("@qvac/sdk") & {
-    TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32: unknown;
-    TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE_6: unknown;
+    TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32: { src: string };
+    TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE: { src: string };
   };
 }
