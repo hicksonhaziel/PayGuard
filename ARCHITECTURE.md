@@ -345,11 +345,13 @@ This database stays on the user's machine.
 Direct send:
 
 - USDC supported
-- USDT disabled by default
+- USDT enabled only when a demo mint is configured with `PAYGUARD_DEVNET_USDT_MINT`
+- the devnet USDT mint is treated as a demo/test mint, not official Tether devnet USDT
 
 Guarded payments:
 
-- devnet USDC only
+- devnet only
+- USDC and any configured demo USDT mint
 
 ### Mainnet
 
@@ -380,7 +382,7 @@ PayGuard does not:
 
 ## Current MVP Limits
 
-- Guarded escrow is devnet USDC only.
+- Guarded escrow is devnet only, using USDC or configured demo USDT.
 - Mainnet guarded payments are not enabled.
 - Public devnet RPC can be unreliable.
 - OCR can misread low-quality images.

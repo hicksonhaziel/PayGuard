@@ -15,7 +15,8 @@ The core idea is simple: wallets sign transactions, but PayGuard checks the paym
 - Uses local LLM reasoning to produce a `Safe`, `Review`, or `Block` verdict.
 - Generates a spoken verdict artifact with QVAC TTS before the user signs.
 - Sends real Solana SPL stablecoin transfers through Phantom or Solflare.
-- Supports guarded payments on devnet USDC with sender cancel and receiver claim.
+- Supports guarded payments on devnet USDC and configured demo USDT with sender cancel and receiver claim.
+- Supports configurable demo USDT on devnet when a test mint is provided.
 - Keeps recipient records, payment history, and receipts in a local SQLite database.
 
 ## Project Structure
@@ -100,7 +101,15 @@ The app defaults to this devnet USDC mint:
 
 Use a devnet USDC faucet or a test mint flow that funds this mint. The sender wallet must hold devnet USDC before direct send or guarded payment funding will work.
 
-Devnet USDT is intentionally disabled in the UI because there is no reliable default devnet USDT mint configured for this MVP.
+### Devnet Demo USDT
+
+There is no canonical official devnet USDT mint. PayGuard supports devnet USDT only when a demo mint is configured:
+
+```bash
+PAYGUARD_DEVNET_USDT_MINT=<YOUR_DEMO_USDT_MINT>
+```
+
+When this variable is set, the desktop app labels the devnet balance as `Demo USDT` and enables USDT direct-send and guarded-payment testing on devnet. Mainnet USDT still uses the official Tether mint.
 
 ## Solana Networks And Mints
 
@@ -117,9 +126,9 @@ Mainnet USDT:
 Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
 ```
 
-Direct send supports mainnet USDC and USDT in code, but the demo focus is devnet.
+Direct send supports mainnet USDC/USDT and configurable devnet demo USDT.
 
-Guarded payments are currently enabled for devnet USDC only.
+Guarded payments are currently enabled for devnet USDC and configured devnet demo USDT.
 
 ## Environment Variables
 
@@ -130,7 +139,7 @@ PAYGUARD_SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com
 PAYGUARD_SOLANA_MAINNET_RPC_URL=https://api.mainnet-beta.solana.com
 PAYGUARD_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 PAYGUARD_DEVNET_USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
-PAYGUARD_DEVNET_USDT_MINT=
+PAYGUARD_DEVNET_USDT_MINT=<optional-demo-usdt-mint>
 PAYGUARD_ESCROW_PROGRAM_ID=CzQ6EYC8PBwLC5QsrAcrjeEQKJzbcLWZfTta7Qi8MZKZ
 PAYGUARD_BALANCE_CACHE_SECONDS=60
 PAYGUARD_WALLET_BRIDGE_PORT=49152
@@ -209,7 +218,7 @@ Manual fields are always the transaction intent. OCR is verification evidence.
 
 Guarded payments are a recovery-window escrow flow for risky or first-time payments.
 
-The sender funds a PayGuard escrow PDA with devnet USDC. The receiver can claim after the unlock time. The sender can cancel before unlock.
+The sender funds a PayGuard escrow PDA with a supported devnet stablecoin mint. The receiver can claim after the unlock time. The sender can cancel before unlock.
 
 Current devnet program:
 
@@ -273,16 +282,17 @@ Private keys are never stored by PayGuard. Signing happens in Phantom or Solflar
 
 ### Guarded Claim
 
-1. Sender creates a guarded devnet USDC payment.
+1. Sender creates a guarded devnet USDC or demo USDT payment.
 2. Receiver connects their wallet.
 3. Receiver waits for unlock.
 4. Receiver claims from the `Guarded` page.
 
 ## Known MVP Limits
 
-- Guarded payments are devnet USDC only.
+- Guarded payments are devnet only, using USDC or configured demo USDT.
 - Mainnet guarded escrow is not deployed or enabled.
-- Direct send has mainnet USDC/USDT mint support, but mainnet use should be treated carefully.
+- Direct send supports mainnet USDC/USDT and configurable devnet demo USDT.
+- There is no official devnet USDT mint configured by default.
 - Public devnet RPC can be flaky. Guarded discovery may occasionally fail with network fetch errors.
 - OCR can misread low-quality images, stylized text, or currency symbols. PayGuard treats OCR as verification evidence, not the payment source of truth.
 - Uploaded documents must be local files. PNG/JPG images are supported for the MVP.

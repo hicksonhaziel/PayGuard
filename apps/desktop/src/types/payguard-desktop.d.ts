@@ -94,6 +94,13 @@ declare global {
       solana?: InjectedSolanaProvider;
     };
     payguardDesktop?: {
+      getStablecoinConfig: () => Promise<{
+        devnetUsdcMint: string | null;
+        devnetUsdtConfigured: boolean;
+        devnetUsdtMint: string | null;
+        mainnetUsdcMint: string | null;
+        mainnetUsdtMint: string | null;
+      }>;
       analyzeDocumentWithOcr: (imagePath: string) => Promise<QvacOcrResult>;
       analyzePaymentRisk: (input: RiskAnalysisInput) => Promise<RiskVerdict>;
       synthesizeSpokenVerdict: (input: RiskVerdict) => Promise<{

@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("payguardDesktop", {
+  getStablecoinConfig: () =>
+    ipcRenderer.invoke("app:get-stablecoin-config"),
   analyzeDocumentWithOcr: (imagePath: string) =>
     ipcRenderer.invoke("qvac:analyze-document-ocr", imagePath),
   analyzePaymentRisk: (input: unknown) =>

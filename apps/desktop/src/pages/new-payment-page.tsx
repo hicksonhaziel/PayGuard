@@ -8,6 +8,7 @@ import type {
   ConnectedWallet,
   PaymentAnalysisRequest,
   PrefilledRecipient,
+  StablecoinConfig,
   SolanaNetwork
 } from "../App";
 
@@ -39,6 +40,7 @@ type RecipientSummary = Awaited<
 
 interface NewPaymentPageProps {
   network: SolanaNetwork;
+  stablecoinConfig: StablecoinConfig;
   wallet: ConnectedWallet | null;
   prefilledRecipient: PrefilledRecipient | null;
   onAnalyze: (request: PaymentAnalysisRequest) => void;
@@ -47,6 +49,7 @@ interface NewPaymentPageProps {
 
 export function NewPaymentPage({
   network,
+  stablecoinConfig,
   wallet,
   prefilledRecipient,
   onAnalyze,
@@ -71,6 +74,7 @@ export function NewPaymentPage({
   });
   const [hasAttemptedAnalyze, setHasAttemptedAnalyze] = useState(false);
   const validationErrors = validatePaymentInput(buildPaymentRagInput());
+  const isDevnetUsdtConfigured = stablecoinConfig.devnetUsdtConfigured;
 
   function buildPaymentRagInput(draft = paymentDraft): PaymentRagInput {
     return {
@@ -182,13 +186,17 @@ export function NewPaymentPage({
   }, [prefilledRecipient, wallet?.address, network]);
 
   useEffect(() => {
-    if (network === "devnet" && paymentDraft.token === "USDT") {
+    if (
+      network === "devnet" &&
+      paymentDraft.token === "USDT" &&
+      !isDevnetUsdtConfigured
+    ) {
       updatePaymentDraft({
         ...paymentDraft,
         token: "USDC"
       });
     }
-  }, [network, paymentDraft]);
+  }, [isDevnetUsdtConfigured, network, paymentDraft]);
 
   useEffect(() => {
     return () => {
@@ -224,6 +232,7 @@ export function NewPaymentPage({
               errors={hasAttemptedAnalyze ? validationErrors : {}}
               isLoadingRecipients={isLoadingRecipients}
               network={network}
+              stablecoinConfig={stablecoinConfig}
               wallet={wallet}
               onDraftChange={updatePaymentDraft}
               recipients={recipients}
@@ -387,6 +396,7 @@ interface ManualEntryCardProps {
   errors: PaymentValidationErrors;
   isLoadingRecipients: boolean;
   network: SolanaNetwork;
+  stablecoinConfig: StablecoinConfig;
   wallet: ConnectedWallet | null;
   onDraftChange: (draft: PaymentDraft) => void;
   recipients: RecipientSummary[];
@@ -397,11 +407,13 @@ function ManualEntryCard({
   errors,
   isLoadingRecipients,
   network,
+  stablecoinConfig,
   wallet,
   onDraftChange,
   recipients
 }: ManualEntryCardProps) {
   const isDevnet = network === "devnet";
+  const isDevnetUsdtConfigured = stablecoinConfig.devnetUsdtConfigured;
 
   function selectPastRecipient(wallet: string) {
     onDraftChange({
@@ -521,8 +533,12 @@ function ManualEntryCard({
                 value={draft.token}
               >
                 <option value="USDC">USDC</option>
-                <option disabled={isDevnet} value="USDT">
-                  {isDevnet ? "USDT unavailable on devnet" : "USDT"}
+                <option disabled={isDevnet && !isDevnetUsdtConfigured} value="USDT">
+                  {isDevnet && !isDevnetUsdtConfigured
+                    ? "USDT demo mint not configured"
+                    : isDevnet
+                      ? "USDT Demo"
+                      : "USDT"}
                 </option>
               </select>
               <span className="material-symbols-outlined pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[#76777c]">
@@ -531,7 +547,9 @@ function ManualEntryCard({
             </span>
             {isDevnet ? (
               <span className="text-xs leading-5 text-[#45474c] dark:text-slate-400">
-                Devnet uses USDC for test transfers.
+                {isDevnetUsdtConfigured
+                  ? "Devnet USDT uses the configured demo mint."
+                  : "Set PAYGUARD_DEVNET_USDT_MINT to enable demo USDT."}
               </span>
             ) : null}
           </label>

@@ -117,7 +117,7 @@ const stablecoinMints: Record<
     USDC:
       process.env.PAYGUARD_DEVNET_USDC_MINT ??
       "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    USDT: process.env.PAYGUARD_DEVNET_USDT_MINT ?? null
+    USDT: readOptionalEnv("PAYGUARD_DEVNET_USDT_MINT")
   },
   "mainnet-beta": {
     USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -204,6 +204,14 @@ function createWindow() {
 }
 
 function registerQvacHandlers() {
+  ipcMain.handle("app:get-stablecoin-config", async () => ({
+    devnetUsdcMint: stablecoinMints.devnet.USDC,
+    devnetUsdtConfigured: Boolean(stablecoinMints.devnet.USDT),
+    devnetUsdtMint: stablecoinMints.devnet.USDT,
+    mainnetUsdcMint: stablecoinMints["mainnet-beta"].USDC,
+    mainnetUsdtMint: stablecoinMints["mainnet-beta"].USDT
+  }));
+
   ipcMain.handle("qvac:analyze-document-ocr", async (_event, imagePath: unknown) => {
     if (typeof imagePath !== "string" || !imagePath.trim()) {
       throw new Error("A local image path is required for QVAC OCR.");
@@ -256,6 +264,12 @@ function registerQvacHandlers() {
 
     return speakTextWithSystemVoice(input.trim().slice(0, 220));
   });
+}
+
+function readOptionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+
+  return value || null;
 }
 
 async function speakTextWithSystemVoice(text: string) {
@@ -828,6 +842,13 @@ function assertNetwork(network: unknown): SolanaNetwork {
   return "mainnet-beta";
 }
 
+function isSupportedDevnetGuardedToken(
+  network: SolanaNetwork,
+  token: "USDC" | "USDT"
+) {
+  return network === "devnet" && Boolean(stablecoinMints.devnet[token]);
+}
+
 function isPaymentRagInput(input: unknown): input is PaymentRagInput {
   if (!input || typeof input !== "object") {
     return false;
@@ -1305,8 +1326,8 @@ async function startExternalGuardedPaymentBridge(
   window: BrowserWindow,
   input: GuardedPaymentInput
 ) {
-  if (input.network !== "devnet" || input.token !== "USDC") {
-    throw new Error("Guarded payments are currently enabled for devnet USDC only.");
+  if (!isSupportedDevnetGuardedToken(input.network, input.token)) {
+    throw new Error("Guarded payments are currently enabled for devnet USDC or configured demo USDT.");
   }
 
   await closeWalletBridge();
@@ -1340,7 +1361,7 @@ async function startExternalGuardedPaymentBridge(
           renderDirectSendPage(nonce, input, transaction, {
             heading: "Sign PayGuard Guarded Payment",
             intro:
-              "Review this guarded USDC payment. Funds will move into PayGuard escrow and become claimable after the hold window.",
+              `Review this guarded ${input.token} payment. Funds will move into PayGuard escrow and become claimable after the hold window.`,
             routeLabel: "Guarded Payment"
           })
         );
@@ -1411,8 +1432,8 @@ async function startExternalGuardedActionBridge(
   input: GuardedActionInput,
   action: "cancel" | "claim"
 ) {
-  if (input.network !== "devnet" || input.token !== "USDC") {
-    throw new Error("Guarded payment actions are currently enabled for devnet USDC only.");
+  if (!isSupportedDevnetGuardedToken(input.network, input.token)) {
+    throw new Error("Guarded payment actions are currently enabled for devnet USDC or configured demo USDT.");
   }
 
   await closeWalletBridge();

@@ -32,6 +32,13 @@ export type ConnectedWallet = {
   provider: "phantom" | "solflare" | "injected";
 };
 export type SolanaNetwork = "mainnet-beta" | "devnet";
+export type StablecoinConfig = {
+  devnetUsdcMint: string | null;
+  devnetUsdtConfigured: boolean;
+  devnetUsdtMint: string | null;
+  mainnetUsdcMint: string | null;
+  mainnetUsdtMint: string | null;
+};
 export type PrefilledRecipient = {
   name: string;
   walletAddress: string;
@@ -90,6 +97,13 @@ export default function App() {
     useState<ConnectedWallet | null>(() => loadStoredWallet());
   const [selectedNetwork, setSelectedNetwork] =
     useState<SolanaNetwork>(() => loadStoredNetwork());
+  const [stablecoinConfig, setStablecoinConfig] = useState<StablecoinConfig>({
+    devnetUsdcMint: null,
+    devnetUsdtConfigured: false,
+    devnetUsdtMint: null,
+    mainnetUsdcMint: null,
+    mainnetUsdtMint: null
+  });
   const [walletError, setWalletError] = useState<string | null>(null);
   const [isExiting, setIsExiting] = useState(false);
   const [transitionDirection, setTransitionDirection] = useState<
@@ -119,6 +133,14 @@ export default function App() {
     return () => {
       unsubscribe?.();
     };
+  }, []);
+
+  useEffect(() => {
+    window.payguardDesktop?.getStablecoinConfig?.()
+      .then(setStablecoinConfig)
+      .catch((error) => {
+        console.warn("Stablecoin config bridge failed.", error);
+      });
   }, []);
 
   function saveConnectedWallet(wallet: Omit<ConnectedWallet, "connectedAt">) {
@@ -248,8 +270,11 @@ export default function App() {
       return;
     }
 
-    if (selectedNetwork !== "devnet" || paymentDecision.token !== "USDC") {
-      setPaymentActionError("Guarded payments are currently enabled for devnet USDC only.");
+    if (
+      selectedNetwork !== "devnet" ||
+      (paymentDecision.token !== "USDC" && paymentDecision.token !== "USDT")
+    ) {
+      setPaymentActionError("Guarded payments are currently enabled for devnet USDC or demo USDT.");
       return;
     }
 
@@ -261,7 +286,7 @@ export default function App() {
         network: selectedNetwork,
         recipientWallet: paymentDecision.walletAddress,
         senderWallet: connectedWallet.address,
-        token: "USDC",
+        token: paymentDecision.token as "USDC" | "USDT",
         walletProvider: connectedWallet.provider
       });
 
@@ -372,6 +397,7 @@ export default function App() {
         {visibleScreen === "home" ? (
           <HomePage
             network={selectedNetwork}
+            stablecoinConfig={stablecoinConfig}
             wallet={connectedWallet}
             walletError={walletError}
             onConnectWallet={connectWallet}
@@ -426,6 +452,7 @@ export default function App() {
         ) : (
           <NewPaymentPage
             network={selectedNetwork}
+            stablecoinConfig={stablecoinConfig}
             wallet={connectedWallet}
             prefilledRecipient={prefilledRecipient}
             onBack={() => navigateTo("home")}

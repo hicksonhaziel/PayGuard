@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { TrustedSupplier } from "../components/home/trusted-supplier";
-import type { ConnectedWallet, PrefilledRecipient, SolanaNetwork } from "../App";
+import type {
+  ConnectedWallet,
+  PrefilledRecipient,
+  StablecoinConfig,
+  SolanaNetwork
+} from "../App";
 import solanaLogo from "../../assets/solana.png";
 import usdcLogo from "../../assets/usdc.png";
 import usdtLogo from "../../assets/usdt.png";
@@ -18,6 +23,7 @@ type StoredPaymentHistory = Awaited<
 interface HomePageProps {
   wallet: ConnectedWallet | null;
   network: SolanaNetwork;
+  stablecoinConfig: StablecoinConfig;
   walletError: string | null;
   onConnectWallet: () => void;
   onDisconnectWallet: () => void;
@@ -29,6 +35,7 @@ interface HomePageProps {
 
 export function HomePage({
   network,
+  stablecoinConfig,
   wallet,
   walletError,
   onConnectWallet,
@@ -204,7 +211,18 @@ export function HomePage({
                 error={balanceError ?? balances?.errors.USDT ?? null}
                 isLoading={isLoadingBalances}
                 logo={usdtLogo}
-                name="Tether USD"
+                name={
+                  network === "devnet" && stablecoinConfig.devnetUsdtConfigured
+                    ? "Demo USDT"
+                    : "Tether USD"
+                }
+                note={
+                  network === "devnet"
+                    ? stablecoinConfig.devnetUsdtConfigured
+                      ? "Configured demo mint"
+                      : "Demo mint not configured"
+                    : undefined
+                }
                 symbol="USDT"
                 wallet={wallet}
               />
@@ -400,6 +418,7 @@ function BalanceCard({
   isLoading,
   logo,
   name,
+  note,
   symbol,
   wallet
 }: {
@@ -408,6 +427,7 @@ function BalanceCard({
   isLoading: boolean;
   logo: string;
   name: string;
+  note?: string;
   symbol: "USDC" | "USDT";
   wallet: ConnectedWallet | null;
 }) {
@@ -442,11 +462,12 @@ function BalanceCard({
           : "Connect wallet"}
       </p>
       <p className="mt-2 text-xs leading-5 text-[#45474c] dark:text-slate-400">
-        {error && amount === null
+        {note ??
+        (error && amount === null
           ? "Balance sync failed. Retrying from cache window."
           : wallet
             ? ""
-            : "Connect Solflare or Phantom to load this wallet's balance."}
+            : "Connect Solflare or Phantom to load this wallet's balance.")}
       </p>
     </article>
   );

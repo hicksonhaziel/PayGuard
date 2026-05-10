@@ -122,7 +122,7 @@ export function GuardedPaymentsPage({
         {!wallet ? (
           <EmptyState message="Connect wallet to discover guarded payments." />
         ) : network !== "devnet" ? (
-          <EmptyState message="Guarded payments are enabled on devnet USDC for this MVP." />
+          <EmptyState message="Guarded payments are enabled on devnet stablecoin mints." />
         ) : error ? (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-[#9f1239] dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-200">
             {error}
