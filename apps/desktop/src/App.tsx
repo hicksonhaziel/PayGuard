@@ -447,7 +447,7 @@ export default function App() {
             decision={paymentDecision}
             network={selectedNetwork}
             wallet={connectedWallet}
-            onNewPayment={() => startNewPayment()}
+            onNewPayment={() => navigateTo("home")}
           />
         ) : (
           <NewPaymentPage

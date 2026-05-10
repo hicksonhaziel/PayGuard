@@ -101,6 +101,7 @@ declare global {
         mainnetUsdcMint: string | null;
         mainnetUsdtMint: string | null;
       }>;
+      openExternalUrl: (url: string) => Promise<{ ok: true }>;
       analyzeDocumentWithOcr: (imagePath: string) => Promise<QvacOcrResult>;
       analyzePaymentRisk: (input: RiskAnalysisInput) => Promise<RiskVerdict>;
       synthesizeSpokenVerdict: (input: RiskVerdict) => Promise<{

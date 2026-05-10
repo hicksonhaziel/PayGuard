@@ -19,42 +19,9 @@ export function SuccessPage({
   const savedReceiptRef = useRef(false);
   const [guardedActionError, setGuardedActionError] = useState<string | null>(null);
   const [guardedActionSignature, setGuardedActionSignature] = useState<string | null>(null);
-  const receiptDetails = [
-    {
-      label: "Security Verdict",
-      value: displayDecision.verdict.verdict,
-      meta: displayDecision.verdict.reasons.slice(0, 2)
-    },
-    {
-      label: "Timestamp",
-      value: new Date().toLocaleString()
-    },
-    {
-      label: "Payment Mode",
-      value: displayDecision.selectedRoute,
-      tag: displayDecision.selectedRoute === "Guarded Payment" ? "Escrow" : "Direct"
-    },
-    ...(displayDecision.selectedRoute === "Guarded Payment"
-      ? [
-          {
-            label: "Claim Window",
-            value: displayDecision.unlockAt
-              ? formatUnlockDate(displayDecision.unlockAt)
-              : `${displayDecision.guardedHoldHours} hours`,
-            tag: "Hold"
-          },
-          {
-            label: "Escrow",
-            value: displayDecision.escrowAddress ?? "Pending escrow",
-            mono: true
-          }
-        ]
-      : []),
-    {
-      label: "Risk Score",
-      value: `${displayDecision.verdict.riskScore}/100`
-    }
-  ] as const;
+  const explorerUrl = displayDecision.txSignature
+    ? `https://explorer.solana.com/tx/${displayDecision.txSignature}?cluster=${network === "devnet" ? "devnet" : "mainnet-beta"}`
+    : null;
 
   useEffect(() => {
     if (!decision || !wallet || savedReceiptRef.current) {
@@ -118,9 +85,7 @@ export function SuccessPage({
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] px-6 py-5 dark:bg-[#0f172a]">
-      <div className="absolute left-0 top-0 h-1.5 w-full bg-gradient-to-r from-[#1a202c] via-[#6cf8bb] to-[#1a202c]" />
-
-      <section className="flex w-full max-w-[620px] flex-col items-center gap-3">
+      <section className="flex w-full max-w-[560px] flex-col items-center gap-3">
         <header className="flex flex-col items-center gap-2 text-center">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-[#6cf8bb]/20 text-[#006c49] dark:text-[#6ffbbe]">
             <span className="material-symbols-outlined text-[30px] [font-variation-settings:'FILL'_1,'wght'_400,'GRAD'_0,'opsz'_24]">
@@ -144,10 +109,8 @@ export function SuccessPage({
           </div>
         </header>
 
-        <article className="relative w-full overflow-hidden rounded-2xl border border-[#e0e3e5] bg-white p-4 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
-          <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[#ebeef0] opacity-50 blur-3xl dark:bg-white/10" />
-
-          <section className="relative z-10 flex flex-col items-center gap-1.5 border-b border-[#e0e3e5] pb-4 text-center dark:border-white/10">
+        <article className="w-full rounded-2xl border border-[#e0e3e5] bg-white p-5 shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
+          <section className="flex flex-col items-center gap-1.5 text-center">
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#45474c] dark:text-slate-400">
               Amount Sent
             </span>
@@ -172,12 +135,20 @@ export function SuccessPage({
               </span>
             </div>
           </section>
-
-          <section className="relative z-10 grid grid-cols-2 gap-x-5 gap-y-3 pt-4 max-md:grid-cols-1">
-            {receiptDetails.map((detail) => (
-              <ReceiptDetail key={detail.label} {...detail} />
-            ))}
-          </section>
+          <dl className="mt-5 grid gap-2 rounded-xl bg-[#f1f4f6] p-3 text-sm dark:bg-white/[0.04]">
+            <ReceiptRow label="Route" value={displayDecision.selectedRoute} />
+            <ReceiptRow label="Verdict" value={`${displayDecision.verdict.verdict} (${displayDecision.verdict.riskScore}/100)`} />
+            {displayDecision.selectedRoute === "Guarded Payment" ? (
+              <ReceiptRow
+                label="Claim Window"
+                value={
+                  displayDecision.unlockAt
+                    ? formatUnlockDate(displayDecision.unlockAt)
+                    : `${displayDecision.guardedHoldHours} hours`
+                }
+              />
+            ) : null}
+          </dl>
         </article>
 
         <section className="mt-1 flex w-full flex-wrap items-center justify-center gap-2.5">
@@ -198,15 +169,21 @@ export function SuccessPage({
             onClick={onNewPayment}
             type="button"
           >
-            New Payment
+            Home
             <span className="material-symbols-outlined text-[20px]">
-              arrow_forward
+              home
             </span>
           </button>
         </section>
 
         <button
           className="text-xs font-semibold text-[#006c49] underline decoration-[#006c49]/30 underline-offset-4 transition-colors hover:text-[#005236] dark:text-[#6ffbbe]"
+          disabled={!explorerUrl}
+          onClick={() => {
+            if (explorerUrl) {
+              void window.payguardDesktop?.openExternalUrl(explorerUrl);
+            }
+          }}
           type="button"
         >
           View in Explorer
@@ -273,61 +250,15 @@ function GuardedReceiptActions({
   );
 }
 
-interface ReceiptDetailProps {
-  label: string;
-  meta?: readonly string[];
-  mono?: boolean;
-  tag?: string;
-  value: string;
-}
-
-function ReceiptDetail({ label, meta, mono, tag, value }: ReceiptDetailProps) {
+function ReceiptRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#45474c] dark:text-slate-400">
+    <div className="flex items-center justify-between gap-4">
+      <dt className="text-xs font-semibold text-[#45474c] dark:text-slate-400">
         {label}
-      </span>
-
-      {label === "Security Verdict" ? (
-        <div className="flex flex-wrap items-start gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[#6cf8bb]/40 bg-[#6cf8bb]/20 px-2.5 py-1 text-xs font-semibold text-[#00714d] dark:text-[#6ffbbe]">
-            <span className="material-symbols-outlined text-[14px]">shield</span>
-            {value}
-          </span>
-          <ul className="grid gap-0.5">
-            {meta?.map((item) => (
-              <li
-                className="flex items-center gap-1 text-[11px] text-[#45474c] dark:text-slate-400"
-                key={item}
-              >
-                <span className="material-symbols-outlined text-[14px] text-[#006c49] dark:text-[#6ffbbe]">
-                  check
-                </span>
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : label === "Payment Mode" ? (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-[#181c1e] dark:text-white">{value}</span>
-          {tag ? (
-            <span className="rounded bg-[#ebeef0] px-2 py-0.5 text-[11px] text-[#45474c] dark:bg-white/10 dark:text-slate-400">
-              {tag}
-            </span>
-          ) : null}
-        </div>
-      ) : (
-        <span
-          className={
-            mono
-              ? "truncate rounded border border-[#e0e3e5] bg-[#f1f4f6] p-1.5 font-mono text-[11px] text-[#76777c] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400"
-              : "text-xs text-[#181c1e] dark:text-white"
-          }
-        >
-          {value}
-        </span>
-      )}
+      </dt>
+      <dd className="m-0 text-right text-xs font-semibold text-[#181c1e] dark:text-white">
+        {value}
+      </dd>
     </div>
   );
 }

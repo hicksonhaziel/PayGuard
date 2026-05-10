@@ -76,6 +76,33 @@ export function NewPaymentPage({
   const validationErrors = validatePaymentInput(buildPaymentRagInput());
   const isDevnetUsdtConfigured = stablecoinConfig.devnetUsdtConfigured;
 
+  if (!wallet) {
+    return (
+      <main className="min-h-[calc(100vh-64px)] bg-[#f7fafc] px-7 py-8 dark:bg-[#0f172a] max-lg:px-5">
+        <section className="mx-auto grid max-w-[560px] gap-4 rounded-2xl border border-[#e5e9eb] bg-white p-6 text-center shadow-[0_4px_20px_rgba(26,32,44,0.05)] dark:border-white/10 dark:bg-[#111827]">
+          <span className="material-symbols-outlined mx-auto text-4xl text-[#006c49] dark:text-[#6ffbbe]">
+            account_balance_wallet
+          </span>
+          <div>
+            <h1 className="font-['Manrope'] text-xl font-bold text-[#030813] dark:text-white">
+              Connect a wallet to create a payment
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-[#45474c] dark:text-slate-400">
+              PayGuard needs your sender wallet before it can analyze or prepare a transaction.
+            </p>
+          </div>
+          <button
+            className="mx-auto rounded-xl bg-[#030813] px-5 py-3 text-sm font-bold text-white dark:bg-[#6ffbbe] dark:text-[#002113]"
+            onClick={onBack}
+            type="button"
+          >
+            Back to dashboard
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   function buildPaymentRagInput(draft = paymentDraft): PaymentRagInput {
     return {
       recipientWallet: draft.walletAddress,
@@ -497,11 +524,11 @@ function ManualEntryCard({
           ) : null}
         </label>
 
-        <div className="grid grid-cols-3 gap-3 max-sm:grid-cols-1">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(150px,1fr)] items-start gap-3 max-sm:grid-cols-1">
           <label className="col-span-2 grid gap-2 max-sm:col-span-1">
             <span className="pg-field-label">Amount</span>
-            <span className="relative">
-              <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 font-['Manrope'] text-[#76777c]">
+            <span className="relative block">
+              <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center font-['Manrope'] text-[#76777c]">
                 $
               </span>
               <input
@@ -524,7 +551,7 @@ function ManualEntryCard({
 
           <label className="grid gap-2">
             <span className="pg-field-label">Token</span>
-            <span className="relative">
+            <span className="relative block">
               <select
                 className="pg-input appearance-none pr-10"
                 onChange={(event) =>

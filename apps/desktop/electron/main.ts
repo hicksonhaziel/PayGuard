@@ -212,6 +212,15 @@ function registerQvacHandlers() {
     mainnetUsdtMint: stablecoinMints["mainnet-beta"].USDT
   }));
 
+  ipcMain.handle("app:open-external-url", async (_event, url: unknown) => {
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+      throw new Error("A valid external URL is required.");
+    }
+
+    await shell.openExternal(url);
+    return { ok: true };
+  });
+
   ipcMain.handle("qvac:analyze-document-ocr", async (_event, imagePath: unknown) => {
     if (typeof imagePath !== "string" || !imagePath.trim()) {
       throw new Error("A local image path is required for QVAC OCR.");
@@ -1213,29 +1222,7 @@ function prepareQvacBareRuntime() {
 }
 
 async function openWalletBridgeUrl(url: string) {
-  if (process.platform !== "linux") {
-    await shell.openExternal(url);
-    return;
-  }
-
-  const realHome = os.userInfo().homedir || process.env.HOME;
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("xdg-open", [url], {
-      env: {
-        ...process.env,
-        ...(realHome ? { HOME: realHome } : {})
-      },
-      detached: true,
-      stdio: "ignore"
-    });
-
-    child.once("error", reject);
-    child.once("spawn", resolve);
-    child.unref();
-  }).catch(async () => {
-    await shell.openExternal(url);
-  });
+  await shell.openExternal(url);
 }
 
 async function startExternalDirectSendBridge(
@@ -2008,7 +1995,7 @@ function renderWalletConnectPage(nonce: string) {
   <style>
     body {
       align-items: center;
-      background: #f7fafc;
+      background: radial-gradient(at 0% 0%, rgba(16,185,129,.08), transparent 45%), #f7fafc;
       color: #030813;
       display: flex;
       font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -2020,8 +2007,8 @@ function renderWalletConnectPage(nonce: string) {
     main {
       background: white;
       border: 1px solid #e5e9eb;
-      border-radius: 18px;
-      box-shadow: 0 14px 45px rgba(15, 23, 42, 0.08);
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(26,32,44,.08);
       max-width: 440px;
       padding: 28px;
       width: 100%;
@@ -2059,6 +2046,14 @@ function renderWalletConnectPage(nonce: string) {
       background: #f1f4f6;
       color: #030813;
     }
+    .hint {
+      color: #006c49;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
     #status {
       border-radius: 12px;
       background: #f1f4f6;
@@ -2082,8 +2077,10 @@ function renderWalletConnectPage(nonce: string) {
 </head>
 <body>
   <main>
-    <h1>Connect PayGuard Wallet</h1>
-    <p>This page connects to Solflare or Phantom in your browser and sends only your public wallet address back to the local PayGuard desktop app.</p>
+    <div class="hint">QVAC PayGuard</div>
+    <h1>Connect Solana Wallet</h1>
+    <p>Choose any injected Solana wallet in this browser. PayGuard receives only your public wallet address.</p>
+    <button id="injected">Connect Solana Wallet</button>
     <button id="solflare">Connect Solflare</button>
     <button id="phantom" class="secondary">Connect Phantom</button>
     <div id="status">Waiting for wallet selection.</div>
@@ -2107,6 +2104,7 @@ function renderWalletConnectPage(nonce: string) {
     function getProvider(kind) {
       if (kind === "solflare" && window.solflare) return window.solflare;
       if (kind === "phantom" && window.phantom && window.phantom.solana) return window.phantom.solana;
+      if (kind === "injected" && window.solana) return window.solana;
       if (window.solana) return window.solana;
       return null;
     }
@@ -2125,7 +2123,7 @@ function renderWalletConnectPage(nonce: string) {
       const provider = getProvider(kind);
 
       if (!provider) {
-        setStatus(kind === "solflare" ? "Solflare is not available in this browser." : "Phantom is not available in this browser.");
+        setStatus(kind === "solflare" ? "Solflare is not available in this browser." : kind === "phantom" ? "Phantom is not available in this browser." : "No injected Solana wallet is available in this browser.");
         return;
       }
 
@@ -2160,6 +2158,7 @@ function renderWalletConnectPage(nonce: string) {
       }
     }
 
+    document.getElementById("injected").addEventListener("click", () => connect("injected"));
     document.getElementById("solflare").addEventListener("click", () => connect("solflare"));
     document.getElementById("phantom").addEventListener("click", () => connect("phantom"));
   </script>
@@ -2187,7 +2186,7 @@ function renderDirectSendPage(
   <style>
     body {
       align-items: center;
-      background: #f7fafc;
+      background: radial-gradient(at 0% 0%, rgba(16,185,129,.08), transparent 45%), #f7fafc;
       color: #030813;
       display: flex;
       font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -2199,8 +2198,8 @@ function renderDirectSendPage(
     main {
       background: white;
       border: 1px solid #e5e9eb;
-      border-radius: 18px;
-      box-shadow: 0 14px 45px rgba(15, 23, 42, 0.08);
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(26,32,44,.08);
       max-width: 480px;
       padding: 28px;
       width: 100%;
@@ -2267,6 +2266,14 @@ function renderDirectSendPage(
       background: #f1f4f6;
       color: #030813;
     }
+    .hint {
+      color: #006c49;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
     #status {
       border-radius: 12px;
       background: #f1f4f6;
@@ -2290,6 +2297,7 @@ function renderDirectSendPage(
 </head>
 <body>
   <main>
+    <div class="hint">QVAC PayGuard</div>
     <h1>${escapeHtml(copy.heading)}</h1>
     <p>${escapeHtml(copy.intro)}</p>
     <dl>
@@ -2326,6 +2334,7 @@ function renderDirectSendPage(
     function getProvider(kind) {
       if (kind === "solflare" && window.solflare) return window.solflare;
       if (kind === "phantom" && window.phantom && window.phantom.solana) return window.phantom.solana;
+      if (kind === "injected" && window.solana) return window.solana;
       if (window.solana) return window.solana;
       return null;
     }
@@ -2355,7 +2364,7 @@ function renderDirectSendPage(
       const provider = getProvider(kind);
 
       if (!provider) {
-        setStatus(kind === "solflare" ? "Solflare is not available in this browser." : "Phantom is not available in this browser.");
+        setStatus(kind === "solflare" ? "Solflare is not available in this browser." : kind === "phantom" ? "Phantom is not available in this browser." : "No injected Solana wallet is available in this browser.");
         return;
       }
 
@@ -2411,7 +2420,9 @@ function renderDirectSendPage(
 
     const solflareButton = document.getElementById("solflare");
     const phantomButton = document.getElementById("phantom");
+    const injectedButton = document.getElementById("injected");
 
+    if (injectedButton) injectedButton.addEventListener("click", () => sign("injected"));
     if (solflareButton) solflareButton.addEventListener("click", () => sign("solflare"));
     if (phantomButton) phantomButton.addEventListener("click", () => sign("phantom"));
   </script>
@@ -2428,8 +2439,13 @@ function renderSigningButtons(walletProvider?: WalletProvider) {
     return `<button id="phantom">Sign with Phantom</button>`;
   }
 
+  if (walletProvider === "injected") {
+    return `<button id="injected">Sign with Solana Wallet</button>`;
+  }
+
   return `<button id="solflare">Sign with Solflare</button>
-    <button id="phantom" class="secondary">Sign with Phantom</button>`;
+    <button id="phantom" class="secondary">Sign with Phantom</button>
+    <button id="injected" class="secondary">Sign with Solana Wallet</button>`;
 }
 
 function escapeHtml(value: string) {
