@@ -564,7 +564,7 @@ function ManualEntryCard({
                   {isDevnet && !isDevnetUsdtConfigured
                     ? "USDT demo mint not configured"
                     : isDevnet
-                      ? "USDT Demo"
+                      ? "USDT"
                       : "USDT"}
                 </option>
               </select>
