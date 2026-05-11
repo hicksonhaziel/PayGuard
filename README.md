@@ -4,9 +4,11 @@ QVAC PayGuard is a local-first desktop payment safety layer for Solana stablecoi
 
 The core idea is simple: wallets sign transactions, but PayGuard checks the payment intent first.
 
-## Presentation
+## Demo And Presentation
 
 [View the QVAC PayGuard presentation deck](https://qvac-payguard-9ekt8fa.gamma.site/)
+
+[Watch the QVAC PayGuard demo video](https://youtu.be/tVWRAqD-pDE)
 
 ## What PayGuard Does
 
